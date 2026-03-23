@@ -1,4 +1,5 @@
 import sys
+from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QTabWidget, QVBoxLayout, QHBoxLayout,
     QToolBar, QPushButton, QLineEdit, QLabel, QTableView, QAbstractItemView, QHeaderView,
@@ -94,13 +95,31 @@ class TaskTab(QWidget):
         self._all_tasks.append(task)
         self.apply_filter(self.filter_bar.filter_input.text())
 
+    def _sort_tasks_by_last_activity(self, tasks):
+        return sorted(
+            tasks,
+            key=lambda task: task.last_activity or datetime.min,
+            reverse=True,
+        )
+
+    def pause_active_tasks(self):
+        paused_any = False
+        for task in self._all_tasks:
+            if task.is_active:
+                task.stop_session()
+                paused_any = True
+
+        if paused_any:
+            self.apply_filter(self.filter_bar.filter_input.text())
+
     def apply_filter(self, text):
         # Case-insensitive, partial substring match over full task string
         t = text.strip().lower()
         if not t:
-            self._filtered_tasks = self._all_tasks.copy()
+            filtered_tasks = self._all_tasks.copy()
         else:
-            self._filtered_tasks = [task for task in self._all_tasks if t in task.name.lower()]
+            filtered_tasks = [task for task in self._all_tasks if t in task.name.lower()]
+        self._filtered_tasks = self._sort_tasks_by_last_activity(filtered_tasks)
         self.model.update_tasks(self._filtered_tasks)
         self.table.clearSelection()
         self._emit_selection_changed()
@@ -132,6 +151,7 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.Accepted:
             name = name_input.text().strip()
             if name:
+                self.active_tab.pause_active_tasks()
                 task = Task(name=name)
                 task.start_session()  # Start tracking immediately
                 self.active_tab.add_task(task)
