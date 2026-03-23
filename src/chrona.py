@@ -98,7 +98,10 @@ class TaskTab(QWidget):
     def _sort_tasks_by_last_activity(self, tasks):
         return sorted(
             tasks,
-            key=lambda task: task.last_activity or datetime.min,
+            key=lambda task: (
+                1 if task.is_active else 0,
+                task.last_activity or datetime.min,
+            ),
             reverse=True,
         )
 
@@ -129,6 +132,23 @@ class TaskTab(QWidget):
         selected_rows = sorted({index.row() for index in selected_indexes})
         return [self._filtered_tasks[row] for row in selected_rows]
 
+    def selected_task(self):
+        selected_tasks = self.selected_tasks()
+        if len(selected_tasks) != 1:
+            return None
+        return selected_tasks[0]
+
+    def refresh(self):
+        self.apply_filter(self.filter_bar.filter_input.text())
+
+    def select_task(self, task: Task):
+        try:
+            row = self._filtered_tasks.index(task)
+        except ValueError:
+            return
+
+        self.table.selectRow(row)
+
     def _emit_selection_changed(self, *_args):
         self.selection_changed.emit()
 
@@ -156,7 +176,7 @@ class MainWindow(QMainWindow):
                 task.start_session()  # Start tracking immediately
                 self.active_tab.add_task(task)
                 self.tabs.setCurrentWidget(self.active_tab)
-                self.active_tab.table.clearSelection()
+                self.active_tab.select_task(task)
                 self.update_toolbar_state()
 
     def __init__(self):
@@ -171,7 +191,9 @@ class MainWindow(QMainWindow):
         self.new_activity_btn = QPushButton(QIcon.fromTheme("list-add"), "New Activity")
         self.new_activity_btn.clicked.connect(self.add_new_task)
         self.resume_btn = QPushButton(QIcon.fromTheme("media-playback-start"), "Resume")
+        self.resume_btn.clicked.connect(self.resume_selected_task)
         self.pause_btn = QPushButton(QIcon.fromTheme("media-playback-pause"), "Pause")
+        self.pause_btn.clicked.connect(self.pause_selected_task)
         self.complete_btn = QPushButton(QIcon.fromTheme("task-complete"), "Complete")
         toolbar.addWidget(self.new_activity_btn)
         toolbar.addWidget(self.resume_btn)
@@ -215,6 +237,33 @@ class MainWindow(QMainWindow):
 
         self.resume_btn.setEnabled(True)
         self.complete_btn.setEnabled(True)
+
+    def pause_selected_task(self):
+        if self.tabs.currentWidget() is not self.active_tab:
+            return
+
+        selected_task = self.active_tab.selected_task()
+        if selected_task is None or not selected_task.is_active:
+            return
+
+        selected_task.stop_session()
+        self.active_tab.refresh()
+        self.active_tab.select_task(selected_task)
+        self.update_toolbar_state()
+
+    def resume_selected_task(self):
+        if self.tabs.currentWidget() is not self.active_tab:
+            return
+
+        selected_task = self.active_tab.selected_task()
+        if selected_task is None or selected_task.is_active:
+            return
+
+        self.active_tab.pause_active_tasks()
+        selected_task.start_session()
+        self.active_tab.refresh()
+        self.active_tab.select_task(selected_task)
+        self.update_toolbar_state()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
