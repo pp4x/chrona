@@ -1,33 +1,144 @@
 import sys
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QTabWidget, QVBoxLayout, QHBoxLayout,
-    QToolBar, QPushButton, QLineEdit, QLabel, QListView, QAbstractItemView
+    QToolBar, QPushButton, QLineEdit, QLabel, QTableView, QAbstractItemView, QHeaderView,
+    QDialog, QDialogButtonBox
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, Signal
 from PySide6.QtGui import QIcon
+from reports_pane import ReportsPane
+from Task import Task
+
+
+# --- Utility for time formatting ---
+def format_minutes(minutes):
+    h, m = divmod(minutes, 60)
+    if h:
+        return f"{h}h {m:02d}m" if m else f"{h}h"
+    return f"{m}m"
+
+# --- Task Table Model ---
+class TaskTableModel(QAbstractTableModel):
+    def __init__(self, tasks):
+        super().__init__()
+        self._tasks = tasks
+
+    def rowCount(self, parent=QModelIndex()):
+        return len(self._tasks)
+
+    def columnCount(self, parent=QModelIndex()):
+        return 3  # Task Name, Total Time, Last Activity
+
+    def data(self, index, role=Qt.DisplayRole):
+        if not index.isValid() or role != Qt.DisplayRole:
+            return None
+        task = self._tasks[index.row()]
+        if index.column() == 0:
+            return task.name
+        elif index.column() == 1:
+            return format_minutes(task.total_time)
+        elif index.column() == 2:
+            return task.last_activity_display
+        return None
+
+    def headerData(self, section, orientation, role=Qt.DisplayRole):
+        if role != Qt.DisplayRole:
+            return None
+        if orientation == Qt.Horizontal:
+            return ["Task Name", "Total Time", "Last Activity"][section]
+        return None
+
+    def update_tasks(self, tasks):
+        self.beginResetModel()
+        self._tasks = tasks
+        self.endResetModel()
 
 class FilterBar(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, on_filter_applied, parent=None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
         self.filter_label = QLabel("Filter:")
         self.filter_input = QLineEdit()
+        self.filter_input.setPlaceholderText("Filter (press Enter to apply)")
+        self.filter_input.returnPressed.connect(lambda: on_filter_applied(self.filter_input.text()))
         layout.addWidget(self.filter_label)
         layout.addWidget(self.filter_input)
         self.setLayout(layout)
 
 class TaskTab(QWidget):
+    selection_changed = Signal()
+
     def __init__(self, name, parent=None):
         super().__init__(parent)
+        self.name = name
+        self._all_tasks = self._load_tasks()
+        self._filtered_tasks = self._all_tasks.copy()
         layout = QVBoxLayout(self)
-        self.task_list = QListView()
-        self.task_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.filter_bar = FilterBar()
-        layout.addWidget(self.task_list)
+        self.table = QTableView()
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.model = TaskTableModel(self._filtered_tasks)
+        self.table.setModel(self.model)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.selectionModel().selectionChanged.connect(self._emit_selection_changed)
+        self.filter_bar = FilterBar(self.apply_filter)
+        layout.addWidget(self.table)
         layout.addWidget(self.filter_bar)
         self.setLayout(layout)
 
+    def _load_tasks(self):
+        # No mock data; return empty list. Replace with real data source later.
+        return []
+
+    def add_task(self, task: Task):
+        self._all_tasks.append(task)
+        self.apply_filter(self.filter_bar.filter_input.text())
+
+    def apply_filter(self, text):
+        # Case-insensitive, partial substring match over full task string
+        t = text.strip().lower()
+        if not t:
+            self._filtered_tasks = self._all_tasks.copy()
+        else:
+            self._filtered_tasks = [task for task in self._all_tasks if t in task.name.lower()]
+        self.model.update_tasks(self._filtered_tasks)
+        self.table.clearSelection()
+        self._emit_selection_changed()
+
+    def selected_tasks(self):
+        selected_indexes = self.table.selectionModel().selectedIndexes()
+        selected_rows = sorted({index.row() for index in selected_indexes})
+        return [self._filtered_tasks[row] for row in selected_rows]
+
+    def _emit_selection_changed(self, *_args):
+        self.selection_changed.emit()
+
 class MainWindow(QMainWindow):
+
+    def add_new_task(self):
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QDialogButtonBox, QLineEdit, QLabel
+        dialog = QDialog(self)
+        dialog.setWindowTitle("New Activity")
+        layout = QVBoxLayout(dialog)
+        name_label = QLabel("Task:")
+        name_input = QLineEdit()
+        layout.addWidget(name_label)
+        layout.addWidget(name_input)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        layout.addWidget(buttons)
+        dialog.setLayout(layout)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        if dialog.exec() == QDialog.Accepted:
+            name = name_input.text().strip()
+            if name:
+                task = Task(name=name)
+                task.start_session()  # Start tracking immediately
+                self.active_tab.add_task(task)
+                self.tabs.setCurrentWidget(self.active_tab)
+                self.active_tab.table.clearSelection()
+                self.update_toolbar_state()
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Chrona - Time Tracking, Simplified")
@@ -38,6 +149,7 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
         self.new_activity_btn = QPushButton(QIcon.fromTheme("list-add"), "New Activity")
+        self.new_activity_btn.clicked.connect(self.add_new_task)
         self.resume_btn = QPushButton(QIcon.fromTheme("media-playback-start"), "Resume")
         self.pause_btn = QPushButton(QIcon.fromTheme("media-playback-pause"), "Pause")
         self.complete_btn = QPushButton(QIcon.fromTheme("task-complete"), "Complete")
@@ -50,12 +162,39 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.active_tab = TaskTab("Active")
         self.completed_tab = TaskTab("Completed")
-        self.reports_tab = TaskTab("Reports")
+        self.reports_tab = ReportsPane()
         self.tabs.addTab(self.active_tab, "Active")
         self.tabs.addTab(self.completed_tab, "Completed")
         self.tabs.addTab(self.reports_tab, "Reports")
 
         self.setCentralWidget(self.tabs)
+        self.tabs.currentChanged.connect(self.update_toolbar_state)
+        self.active_tab.selection_changed.connect(self.update_toolbar_state)
+        self.completed_tab.selection_changed.connect(self.update_toolbar_state)
+        self.update_toolbar_state()
+
+    def update_toolbar_state(self):
+        self.new_activity_btn.setEnabled(True)
+        self.resume_btn.setEnabled(False)
+        self.pause_btn.setEnabled(False)
+        self.complete_btn.setEnabled(False)
+
+        current_widget = self.tabs.currentWidget()
+        if current_widget is not self.active_tab:
+            return
+
+        selected_tasks = self.active_tab.selected_tasks()
+        if len(selected_tasks) != 1:
+            return
+
+        selected_task = selected_tasks[0]
+        if selected_task.is_active:
+            self.pause_btn.setEnabled(True)
+            self.complete_btn.setEnabled(True)
+            return
+
+        self.resume_btn.setEnabled(True)
+        self.complete_btn.setEnabled(True)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
