@@ -122,6 +122,10 @@ class TaskRepository:
         task.is_active = bool(sessions and sessions[-1].end is None)
         return self.save_task(task)
 
+    def delete_task(self, task_id: int) -> None:
+        self.connection.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        self.connection.commit()
+
     def _list_tasks(self, where_clause: str) -> list[Task]:
         rows = self.connection.execute(
             f"""

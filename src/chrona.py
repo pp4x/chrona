@@ -8,8 +8,10 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, Signal
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
+from db import connect_database, ensure_schema
 from reports_pane import ReportsPane
 from Task import Task
+from repository import TaskRepository
 from task_edit_dialog import TaskEditDialog
 
 APP_ICON_PATH = Path(__file__).resolve().parent.parent / "icons" / "chrona.png"
@@ -73,10 +75,10 @@ class TaskTab(QWidget):
     selection_changed = Signal()
     task_double_clicked = Signal(object)
 
-    def __init__(self, name, parent=None):
+    def __init__(self, name, tasks=None, parent=None):
         super().__init__(parent)
         self.name = name
-        self._all_tasks = self._load_tasks()
+        self._all_tasks = list(tasks or [])
         self._filtered_tasks = self._all_tasks.copy()
         layout = QVBoxLayout(self)
         self.table = QTableView()
@@ -91,10 +93,6 @@ class TaskTab(QWidget):
         layout.addWidget(self.table)
         layout.addWidget(self.filter_bar)
         self.setLayout(layout)
-
-    def _load_tasks(self):
-        # No mock data; return empty list. Replace with real data source later.
-        return []
 
     def add_task(self, task: Task):
         self._all_tasks.append(task)
@@ -118,14 +116,15 @@ class TaskTab(QWidget):
         )
 
     def pause_active_tasks(self):
-        paused_any = False
+        paused_tasks = []
         for task in self._all_tasks:
             if task.is_active:
                 task.stop_session()
-                paused_any = True
+                paused_tasks.append(task)
 
-        if paused_any:
+        if paused_tasks:
             self.apply_filter(self.filter_bar.filter_input.text())
+        return paused_tasks
 
     def apply_filter(self, text):
         # Case-insensitive, partial substring match over full task string
@@ -201,7 +200,8 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.Accepted:
             name = name_input.text().strip()
             if name:
-                self.active_tab.pause_active_tasks()
+                paused_tasks = self.active_tab.pause_active_tasks()
+                self.persist_tasks(paused_tasks)
                 task, source_tab = self.find_task_by_name(name)
                 if task is None:
                     task = Task(name=name)
@@ -214,12 +214,16 @@ class MainWindow(QMainWindow):
                         self.active_tab.add_task(task)
                     task.start_session()
                     self.active_tab.refresh()
+                self.persist_task(task)
                 self.tabs.setCurrentWidget(self.active_tab)
                 self.active_tab.select_task(task)
                 self.update_toolbar_state()
 
     def __init__(self):
         super().__init__()
+        self.connection = connect_database()
+        ensure_schema(self.connection)
+        self.repository = TaskRepository(self.connection)
         self.setWindowTitle("Chrona - Time Tracking, Simplified")
         self.resize(800, 600)
         self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
@@ -249,8 +253,8 @@ class MainWindow(QMainWindow):
 
         # Tabs
         self.tabs = QTabWidget()
-        self.active_tab = TaskTab("Active")
-        self.completed_tab = TaskTab("Completed")
+        self.active_tab = TaskTab("Active", tasks=self.repository.list_active_tasks())
+        self.completed_tab = TaskTab("Completed", tasks=self.repository.list_completed_tasks())
         self.reports_tab = ReportsPane()
         self.tabs.addTab(self.active_tab, "Active")
         self.tabs.addTab(self.completed_tab, "Completed")
@@ -269,6 +273,13 @@ class MainWindow(QMainWindow):
         self.delete_task_shortcut = QShortcut(QKeySequence(QKeySequence.Delete), self)
         self.delete_task_shortcut.activated.connect(self.delete_selected_tasks)
         self.update_toolbar_state()
+
+    def persist_task(self, task: Task):
+        return self.repository.save_task(task)
+
+    def persist_tasks(self, tasks):
+        for task in tasks:
+            self.persist_task(task)
 
     def update_toolbar_state(self):
         self.new_activity_btn.setEnabled(True)
@@ -315,6 +326,7 @@ class MainWindow(QMainWindow):
             return
 
         selected_task.stop_session()
+        self.persist_task(selected_task)
         self.active_tab.refresh()
         self.active_tab.select_task(selected_task)
         self.update_toolbar_state()
@@ -327,11 +339,13 @@ class MainWindow(QMainWindow):
             if selected_task is None:
                 return
 
-            self.active_tab.pause_active_tasks()
+            paused_tasks = self.active_tab.pause_active_tasks()
+            self.persist_tasks(paused_tasks)
             self.completed_tab.remove_task(selected_task)
             selected_task.completed_at = None
             selected_task.start_session()
             self.active_tab.add_task(selected_task)
+            self.persist_task(selected_task)
             self.tabs.setCurrentWidget(self.active_tab)
             self.active_tab.select_task(selected_task)
             self.update_toolbar_state()
@@ -344,8 +358,10 @@ class MainWindow(QMainWindow):
         if selected_task is None or selected_task.is_active:
             return
 
-        self.active_tab.pause_active_tasks()
+        paused_tasks = self.active_tab.pause_active_tasks()
+        self.persist_tasks(paused_tasks)
         selected_task.start_session()
+        self.persist_task(selected_task)
         self.active_tab.refresh()
         self.active_tab.select_task(selected_task)
         self.update_toolbar_state()
@@ -369,6 +385,8 @@ class MainWindow(QMainWindow):
         if dialog.exec() != QDialog.Accepted:
             return
 
+        self.persist_task(task)
+
         self.active_tab.refresh()
         self.completed_tab.refresh()
         current_tab = self.tabs.currentWidget()
@@ -390,6 +408,7 @@ class MainWindow(QMainWindow):
         selected_task.completed_at = datetime.now()
         self.active_tab.remove_task(selected_task)
         self.completed_tab.add_task(selected_task)
+        self.persist_task(selected_task)
         self.completed_tab.refresh()
         self.active_tab.refresh()
         self.active_tab.table.clearSelection()
@@ -418,6 +437,8 @@ class MainWindow(QMainWindow):
 
         for task in list(selected_tasks):
             current_widget.remove_task(task)
+            if task.id is not None:
+                self.repository.delete_task(task.id)
 
         current_widget.table.clearSelection()
         self.update_toolbar_state()
