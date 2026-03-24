@@ -100,6 +100,13 @@ class TaskTab(QWidget):
         self._all_tasks.append(task)
         self.apply_filter(self.filter_bar.filter_input.text())
 
+    def remove_task(self, task: Task):
+        try:
+            self._all_tasks.remove(task)
+        except ValueError:
+            return
+        self.apply_filter(self.filter_bar.filter_input.text())
+
     def _sort_tasks_by_last_activity(self, tasks):
         return sorted(
             tasks,
@@ -163,6 +170,19 @@ class TaskTab(QWidget):
         self.task_double_clicked.emit(self._filtered_tasks[index.row()])
 
 class MainWindow(QMainWindow):
+    @staticmethod
+    def normalize_task_name(name):
+        return " ".join(name.casefold().split())
+
+    def find_task_by_name(self, name):
+        normalized_name = self.normalize_task_name(name)
+        for task in self.active_tab._all_tasks:
+            if self.normalize_task_name(task.name) == normalized_name:
+                return task, self.active_tab
+        for task in self.completed_tab._all_tasks:
+            if self.normalize_task_name(task.name) == normalized_name:
+                return task, self.completed_tab
+        return None, None
 
     def add_new_task(self):
         from PySide6.QtWidgets import QDialog, QVBoxLayout, QDialogButtonBox, QLineEdit, QLabel
@@ -182,9 +202,18 @@ class MainWindow(QMainWindow):
             name = name_input.text().strip()
             if name:
                 self.active_tab.pause_active_tasks()
-                task = Task(name=name)
-                task.start_session()  # Start tracking immediately
-                self.active_tab.add_task(task)
+                task, source_tab = self.find_task_by_name(name)
+                if task is None:
+                    task = Task(name=name)
+                    task.start_session()  # Start tracking immediately
+                    self.active_tab.add_task(task)
+                else:
+                    if source_tab is self.completed_tab:
+                        self.completed_tab.remove_task(task)
+                        task.completed_at = None
+                        self.active_tab.add_task(task)
+                    task.start_session()
+                    self.active_tab.refresh()
                 self.tabs.setCurrentWidget(self.active_tab)
                 self.active_tab.select_task(task)
                 self.update_toolbar_state()
@@ -206,6 +235,7 @@ class MainWindow(QMainWindow):
         self.pause_btn = QPushButton(QIcon.fromTheme("media-playback-pause"), "Pause")
         self.pause_btn.clicked.connect(self.pause_selected_task)
         self.complete_btn = QPushButton(QIcon.fromTheme("task-complete"), "Complete")
+        self.complete_btn.clicked.connect(self.complete_selected_task)
         toolbar.addWidget(self.new_activity_btn)
         toolbar.addWidget(self.resume_btn)
         toolbar.addWidget(self.pause_btn)
@@ -233,8 +263,16 @@ class MainWindow(QMainWindow):
         self.resume_btn.setEnabled(False)
         self.pause_btn.setEnabled(False)
         self.complete_btn.setEnabled(False)
+        self.resume_btn.setText("Resume")
 
         current_widget = self.tabs.currentWidget()
+        if current_widget is self.completed_tab:
+            selected_task = self.completed_tab.selected_task()
+            if selected_task is not None:
+                self.resume_btn.setEnabled(True)
+                self.resume_btn.setText("Restart")
+            return
+
         if current_widget is not self.active_tab:
             return
 
@@ -265,7 +303,24 @@ class MainWindow(QMainWindow):
         self.update_toolbar_state()
 
     def resume_selected_task(self):
-        if self.tabs.currentWidget() is not self.active_tab:
+        current_widget = self.tabs.currentWidget()
+
+        if current_widget is self.completed_tab:
+            selected_task = self.completed_tab.selected_task()
+            if selected_task is None:
+                return
+
+            self.active_tab.pause_active_tasks()
+            self.completed_tab.remove_task(selected_task)
+            selected_task.completed_at = None
+            selected_task.start_session()
+            self.active_tab.add_task(selected_task)
+            self.tabs.setCurrentWidget(self.active_tab)
+            self.active_tab.select_task(selected_task)
+            self.update_toolbar_state()
+            return
+
+        if current_widget is not self.active_tab:
             return
 
         selected_task = self.active_tab.selected_task()
@@ -288,6 +343,25 @@ class MainWindow(QMainWindow):
         current_tab = self.tabs.currentWidget()
         if current_tab in (self.active_tab, self.completed_tab):
             current_tab.select_task(task)
+        self.update_toolbar_state()
+
+    def complete_selected_task(self):
+        if self.tabs.currentWidget() is not self.active_tab:
+            return
+
+        selected_task = self.active_tab.selected_task()
+        if selected_task is None:
+            return
+
+        if selected_task.is_active:
+            selected_task.stop_session()
+
+        selected_task.completed_at = datetime.now()
+        self.active_tab.remove_task(selected_task)
+        self.completed_tab.add_task(selected_task)
+        self.completed_tab.refresh()
+        self.active_tab.refresh()
+        self.active_tab.table.clearSelection()
         self.update_toolbar_state()
 
 if __name__ == "__main__":

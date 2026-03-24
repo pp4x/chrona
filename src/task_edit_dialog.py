@@ -113,6 +113,7 @@ class TaskEditDialog(QDialog):
         return container
 
     def _refresh_open_controls(self):
+        is_completed_task = self.task.completed_at is not None
         for row in range(self.sessions_table.rowCount()):
             container = self.sessions_table.cellWidget(row, 1)
             if container is None:
@@ -120,7 +121,7 @@ class TaskEditDialog(QDialog):
 
             end_edit = container.layout().itemAt(0).widget()
             open_checkbox = container.layout().itemAt(1).widget()
-            is_top_row = row == 0
+            is_top_row = row == 0 and not is_completed_task
 
             open_checkbox.setEnabled(is_top_row)
             open_checkbox.setVisible(is_top_row)
