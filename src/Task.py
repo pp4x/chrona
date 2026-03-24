@@ -66,6 +66,9 @@ class Task:
 
     @property
     def last_activity_display(self) -> str:
-        if self.last_activity and self.last_activity_type:
-            return f"{self.last_activity.strftime('%H:%M')} ({self.last_activity_type})"
+        if self.sessions:
+            session = self.sessions[-1]
+            begin = session.begin.strftime('%H:%M')
+            end = session.end.strftime('%H:%M') if session.end else 'Now'
+            return f"{begin} - {end}"
         return ""

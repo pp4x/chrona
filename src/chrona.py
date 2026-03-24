@@ -1,5 +1,6 @@
 import sys
 from datetime import datetime
+from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QTabWidget, QVBoxLayout, QHBoxLayout,
     QToolBar, QPushButton, QLineEdit, QLabel, QTableView, QAbstractItemView, QHeaderView,
@@ -9,6 +10,9 @@ from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, Signal
 from PySide6.QtGui import QIcon
 from reports_pane import ReportsPane
 from Task import Task
+from task_edit_dialog import TaskEditDialog
+
+APP_ICON_PATH = Path(__file__).resolve().parent.parent / "icons" / "chrona.png"
 
 
 # --- Utility for time formatting ---
@@ -65,9 +69,9 @@ class FilterBar(QWidget):
         layout.addWidget(self.filter_label)
         layout.addWidget(self.filter_input)
         self.setLayout(layout)
-
 class TaskTab(QWidget):
     selection_changed = Signal()
+    task_double_clicked = Signal(object)
 
     def __init__(self, name, parent=None):
         super().__init__(parent)
@@ -82,6 +86,7 @@ class TaskTab(QWidget):
         self.table.setModel(self.model)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.selectionModel().selectionChanged.connect(self._emit_selection_changed)
+        self.table.doubleClicked.connect(self._handle_double_click)
         self.filter_bar = FilterBar(self.apply_filter)
         layout.addWidget(self.table)
         layout.addWidget(self.filter_bar)
@@ -152,6 +157,11 @@ class TaskTab(QWidget):
     def _emit_selection_changed(self, *_args):
         self.selection_changed.emit()
 
+    def _handle_double_click(self, index):
+        if not index.isValid():
+            return
+        self.task_double_clicked.emit(self._filtered_tasks[index.row()])
+
 class MainWindow(QMainWindow):
 
     def add_new_task(self):
@@ -183,6 +193,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Chrona - Time Tracking, Simplified")
         self.resize(800, 600)
+        self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
 
         # Toolbar
         toolbar = QToolBar()
@@ -213,6 +224,8 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(self.update_toolbar_state)
         self.active_tab.selection_changed.connect(self.update_toolbar_state)
         self.completed_tab.selection_changed.connect(self.update_toolbar_state)
+        self.active_tab.task_double_clicked.connect(self.edit_task)
+        self.completed_tab.task_double_clicked.connect(self.edit_task)
         self.update_toolbar_state()
 
     def update_toolbar_state(self):
@@ -265,8 +278,21 @@ class MainWindow(QMainWindow):
         self.active_tab.select_task(selected_task)
         self.update_toolbar_state()
 
+    def edit_task(self, task: Task):
+        dialog = TaskEditDialog(task, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        self.active_tab.refresh()
+        self.completed_tab.refresh()
+        current_tab = self.tabs.currentWidget()
+        if current_tab in (self.active_tab, self.completed_tab):
+            current_tab.select_task(task)
+        self.update_toolbar_state()
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setWindowIcon(QIcon(str(APP_ICON_PATH)))
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
