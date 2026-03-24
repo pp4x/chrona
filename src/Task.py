@@ -14,6 +14,7 @@ def truncate_to_minute(value: datetime) -> datetime:
 @dataclass
 class Task:
     name: str  # Full normalized task string, includes @category and #project if present
+    id: Optional[int] = None
     sessions: List[Session] = field(default_factory=list)
     is_active: bool = False
     created_at: Optional[datetime] = None

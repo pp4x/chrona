@@ -4,10 +4,10 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QTabWidget, QVBoxLayout, QHBoxLayout,
     QToolBar, QPushButton, QLineEdit, QLabel, QTableView, QAbstractItemView, QHeaderView,
-    QDialog, QDialogButtonBox
+    QDialog, QDialogButtonBox, QMessageBox, QSizePolicy
 )
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, Signal
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from reports_pane import ReportsPane
 from Task import Task
 from task_edit_dialog import TaskEditDialog
@@ -236,10 +236,16 @@ class MainWindow(QMainWindow):
         self.pause_btn.clicked.connect(self.pause_selected_task)
         self.complete_btn = QPushButton(QIcon.fromTheme("task-complete"), "Complete")
         self.complete_btn.clicked.connect(self.complete_selected_task)
+        self.delete_task_btn = QPushButton(QIcon.fromTheme("edit-delete"), "Delete Activity")
+        self.delete_task_btn.clicked.connect(self.delete_selected_tasks)
         toolbar.addWidget(self.new_activity_btn)
         toolbar.addWidget(self.resume_btn)
         toolbar.addWidget(self.pause_btn)
         toolbar.addWidget(self.complete_btn)
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar.addWidget(spacer)
+        toolbar.addWidget(self.delete_task_btn)
 
         # Tabs
         self.tabs = QTabWidget()
@@ -256,6 +262,12 @@ class MainWindow(QMainWindow):
         self.completed_tab.selection_changed.connect(self.update_toolbar_state)
         self.active_tab.task_double_clicked.connect(self.edit_task)
         self.completed_tab.task_double_clicked.connect(self.edit_task)
+        self.new_activity_shortcut = QShortcut(QKeySequence(Qt.Key_Insert), self)
+        self.new_activity_shortcut.activated.connect(self.add_new_task)
+        self.pause_resume_shortcut = QShortcut(QKeySequence(Qt.Key_Space), self)
+        self.pause_resume_shortcut.activated.connect(self.toggle_active_pause_resume)
+        self.delete_task_shortcut = QShortcut(QKeySequence(QKeySequence.Delete), self)
+        self.delete_task_shortcut.activated.connect(self.delete_selected_tasks)
         self.update_toolbar_state()
 
     def update_toolbar_state(self):
@@ -263,12 +275,15 @@ class MainWindow(QMainWindow):
         self.resume_btn.setEnabled(False)
         self.pause_btn.setEnabled(False)
         self.complete_btn.setEnabled(False)
+        self.delete_task_btn.setEnabled(False)
         self.resume_btn.setText("Resume")
 
         current_widget = self.tabs.currentWidget()
         if current_widget is self.completed_tab:
-            selected_task = self.completed_tab.selected_task()
-            if selected_task is not None:
+            selected_tasks = self.completed_tab.selected_tasks()
+            if selected_tasks:
+                self.delete_task_btn.setEnabled(True)
+            if len(selected_tasks) == 1:
                 self.resume_btn.setEnabled(True)
                 self.resume_btn.setText("Restart")
             return
@@ -277,6 +292,8 @@ class MainWindow(QMainWindow):
             return
 
         selected_tasks = self.active_tab.selected_tasks()
+        if selected_tasks:
+            self.delete_task_btn.setEnabled(True)
         if len(selected_tasks) != 1:
             return
 
@@ -333,6 +350,20 @@ class MainWindow(QMainWindow):
         self.active_tab.select_task(selected_task)
         self.update_toolbar_state()
 
+    def toggle_active_pause_resume(self):
+        if self.tabs.currentWidget() is not self.active_tab:
+            return
+
+        selected_task = self.active_tab.selected_task()
+        if selected_task is None:
+            return
+
+        if selected_task.is_active:
+            self.pause_selected_task()
+            return
+
+        self.resume_selected_task()
+
     def edit_task(self, task: Task):
         dialog = TaskEditDialog(task, self)
         if dialog.exec() != QDialog.Accepted:
@@ -362,6 +393,33 @@ class MainWindow(QMainWindow):
         self.completed_tab.refresh()
         self.active_tab.refresh()
         self.active_tab.table.clearSelection()
+        self.update_toolbar_state()
+
+    def delete_selected_tasks(self):
+        current_widget = self.tabs.currentWidget()
+        if current_widget not in (self.active_tab, self.completed_tab):
+            return
+
+        selected_tasks = current_widget.selected_tasks()
+        if not selected_tasks:
+            return
+
+        task_count = len(selected_tasks)
+        noun = "task" if task_count == 1 else "tasks"
+        confirmation = QMessageBox.question(
+            self,
+            "Delete Tasks",
+            f"Delete {task_count} {noun}? This will remove all tracked time and cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirmation != QMessageBox.StandardButton.Yes:
+            return
+
+        for task in list(selected_tasks):
+            current_widget.remove_task(task)
+
+        current_widget.table.clearSelection()
         self.update_toolbar_state()
 
 if __name__ == "__main__":
