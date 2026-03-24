@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QToolBar, QPushButton, QLineEdit, QLabel, QTableView, QAbstractItemView, QHeaderView,
     QDialog, QDialogButtonBox, QMessageBox, QSizePolicy
 )
-from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, Signal
+from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, Signal, QTimer
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from db import connect_database, ensure_schema
 from reports_pane import ReportsPane
@@ -152,6 +152,12 @@ class TaskTab(QWidget):
     def refresh(self):
         self.apply_filter(self.filter_bar.filter_input.text())
 
+    def refresh_preserving_selection(self):
+        selected_tasks = self.selected_tasks()
+        self.apply_filter(self.filter_bar.filter_input.text())
+        for task in selected_tasks:
+            self.select_task(task)
+
     def select_task(self, task: Task):
         try:
             row = self._filtered_tasks.index(task)
@@ -272,6 +278,10 @@ class MainWindow(QMainWindow):
         self.pause_resume_shortcut.activated.connect(self.toggle_active_pause_resume)
         self.delete_task_shortcut = QShortcut(QKeySequence(QKeySequence.Delete), self)
         self.delete_task_shortcut.activated.connect(self.delete_selected_tasks)
+        self.refresh_timer = QTimer(self)
+        self.refresh_timer.setInterval(60_000)
+        self.refresh_timer.timeout.connect(self.refresh_display)
+        self.refresh_timer.start()
         self.update_toolbar_state()
 
     def persist_task(self, task: Task):
@@ -280,6 +290,11 @@ class MainWindow(QMainWindow):
     def persist_tasks(self, tasks):
         for task in tasks:
             self.persist_task(task)
+
+    def refresh_display(self):
+        self.active_tab.refresh_preserving_selection()
+        self.completed_tab.refresh_preserving_selection()
+        self.update_toolbar_state()
 
     def update_toolbar_state(self):
         self.new_activity_btn.setEnabled(True)
@@ -442,6 +457,10 @@ class MainWindow(QMainWindow):
 
         current_widget.table.clearSelection()
         self.update_toolbar_state()
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        self.refresh_display()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
