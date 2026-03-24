@@ -19,14 +19,16 @@ from PySide6.QtWidgets import (
 )
 
 from Task import Session, Task
+from session_ops import normalize_sessions
 
 
 class TaskEditDialog(QDialog):
     DATETIME_FORMAT = "yyyy-MM-dd HH:mm"
 
-    def __init__(self, task: Task, parent=None):
+    def __init__(self, task: Task, save_handler=None, parent=None):
         super().__init__(parent)
         self.task = task
+        self.save_handler = save_handler
         self.setWindowTitle("Edit Task")
         self.resize(640, 360)
 
@@ -180,7 +182,7 @@ class TaskEditDialog(QDialog):
                 return
 
             sessions.append(Session(begin=begin, end=end))
-        sessions = self._normalize_sessions(sessions, now)
+        sessions = normalize_sessions(sessions, now)
         open_sessions = [session for session in sessions if session.end is None]
         if len(open_sessions) > 1:
             QMessageBox.warning(
@@ -198,37 +200,12 @@ class TaskEditDialog(QDialog):
             )
             return
 
-        self.task.name = name
-        self.task.sessions = sessions
-        self.task.is_active = bool(sessions and sessions[-1].end is None)
+        if self.save_handler is not None:
+            if not self.save_handler(self.task, name, sessions):
+                return
+        else:
+            self.task.name = name
+            self.task.sessions = sessions
+            self.task.is_active = bool(sessions and sessions[-1].end is None)
+
         self.accept()
-
-    def _normalize_sessions(self, sessions, now):
-        def effective_end(session):
-            return session.end or now
-
-        ordered = sorted(
-            sessions,
-            key=lambda session: (effective_end(session), session.begin),
-        )
-
-        merged = []
-        for session in ordered:
-            if not merged:
-                merged.append(Session(begin=session.begin, end=session.end))
-                continue
-
-            previous = merged[-1]
-            previous_end = previous.end or now
-
-            if session.begin <= previous_end:
-                previous.begin = min(previous.begin, session.begin)
-                if previous.end is None or session.end is None:
-                    previous.end = None
-                else:
-                    previous.end = max(previous.end, session.end)
-                continue
-
-            merged.append(Session(begin=session.begin, end=session.end))
-
-        return merged

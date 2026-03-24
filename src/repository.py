@@ -49,6 +49,63 @@ class TaskRepository:
         return self._hydrate_task(row)
 
     def save_task(self, task: Task) -> Task:
+        return self._save_task(task, commit=True)
+
+    def complete_task(self, task: Task, completed_at: datetime | None = None) -> Task:
+        task.completed_at = completed_at or datetime.now()
+        task.is_active = False
+        return self.save_task(task)
+
+    def restart_task(self, task: Task, started_at: datetime | None = None) -> Task:
+        task.completed_at = None
+        task.start_session(started_at)
+        return self.save_task(task)
+
+    def replace_sessions(self, task: Task, sessions: list[Session]) -> Task:
+        task.sessions = sessions
+        task.is_active = bool(sessions and sessions[-1].end is None)
+        return self.save_task(task)
+
+    def delete_task(self, task_id: int) -> None:
+        self.connection.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        self.connection.commit()
+
+    def save_tasks(self, tasks: list[Task]) -> None:
+        self.connection.execute("BEGIN")
+        try:
+            for task in tasks:
+                self._save_task(task, commit=False)
+        except Exception:
+            self.connection.rollback()
+            raise
+        self.connection.commit()
+
+    def _list_tasks(self, where_clause: str) -> list[Task]:
+        rows = self.connection.execute(
+            f"""
+            SELECT id, name, normalized_name, category, project, created_at, completed_at
+            FROM tasks
+            {where_clause}
+            ORDER BY COALESCE(completed_at, created_at), name
+            """
+        ).fetchall()
+        return [self._hydrate_task(row) for row in rows]
+
+    def _hydrate_task(self, row: sqlite3.Row) -> Task:
+        sessions = self._load_sessions(row["id"])
+        task = Task(
+            id=row["id"],
+            name=row["name"],
+            sessions=sessions,
+            is_active=bool(sessions and sessions[-1].end is None),
+            created_at=self._from_iso(row["created_at"]),
+            completed_at=self._from_iso(row["completed_at"]),
+            category=row["category"],
+            project=row["project"],
+        )
+        return task
+
+    def _save_task(self, task: Task, commit: bool) -> Task:
         category = extract_category(task.name)
         project = extract_project(task.name)
         created_at = task.created_at or datetime.now()
@@ -102,53 +159,10 @@ class TaskRepository:
                 ),
             )
 
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
         task.category = category
         task.project = project
-        return task
-
-    def complete_task(self, task: Task, completed_at: datetime | None = None) -> Task:
-        task.completed_at = completed_at or datetime.now()
-        task.is_active = False
-        return self.save_task(task)
-
-    def restart_task(self, task: Task, started_at: datetime | None = None) -> Task:
-        task.completed_at = None
-        task.start_session(started_at)
-        return self.save_task(task)
-
-    def replace_sessions(self, task: Task, sessions: list[Session]) -> Task:
-        task.sessions = sessions
-        task.is_active = bool(sessions and sessions[-1].end is None)
-        return self.save_task(task)
-
-    def delete_task(self, task_id: int) -> None:
-        self.connection.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
-        self.connection.commit()
-
-    def _list_tasks(self, where_clause: str) -> list[Task]:
-        rows = self.connection.execute(
-            f"""
-            SELECT id, name, normalized_name, category, project, created_at, completed_at
-            FROM tasks
-            {where_clause}
-            ORDER BY COALESCE(completed_at, created_at), name
-            """
-        ).fetchall()
-        return [self._hydrate_task(row) for row in rows]
-
-    def _hydrate_task(self, row: sqlite3.Row) -> Task:
-        sessions = self._load_sessions(row["id"])
-        task = Task(
-            id=row["id"],
-            name=row["name"],
-            sessions=sessions,
-            is_active=bool(sessions and sessions[-1].end is None),
-            created_at=self._from_iso(row["created_at"]),
-            completed_at=self._from_iso(row["completed_at"]),
-            category=row["category"],
-            project=row["project"],
-        )
         return task
 
     def _load_sessions(self, task_id: int) -> list[Session]:

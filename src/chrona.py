@@ -1,4 +1,5 @@
 import sys
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from PySide6.QtWidgets import (
@@ -12,6 +13,8 @@ from db import connect_database, ensure_schema
 from reports_pane import ReportsPane
 from Task import Task
 from repository import TaskRepository
+from conflict_dialog import ConflictResolutionDialog
+from session_ops import effective_end, normalize_sessions, subtract_interval
 from task_edit_dialog import TaskEditDialog
 
 APP_ICON_PATH = Path(__file__).resolve().parent.parent / "icons" / "chrona.png"
@@ -291,6 +294,92 @@ class MainWindow(QMainWindow):
         for task in tasks:
             self.persist_task(task)
 
+    def all_tasks(self):
+        return self.active_tab._all_tasks + self.completed_tab._all_tasks
+
+    def apply_task_edits(self, task: Task, name: str, sessions):
+        now = datetime.now()
+        working_current = deepcopy(task)
+        working_current.name = name
+        working_current.sessions = normalize_sessions(sessions, now)
+        working_current.is_active = bool(working_current.sessions and working_current.sessions[-1].end is None)
+
+        working_overrides = {}
+
+        while True:
+            conflict = self.find_first_conflict(working_current, working_overrides, now)
+            if conflict is None:
+                break
+
+            conflicting_task, overlap_begin, overlap_end = conflict
+            dialog = ConflictResolutionDialog(
+                overlap_begin,
+                overlap_end,
+                conflicting_task.name,
+                working_current.name,
+                self,
+            )
+            if dialog.exec() != QDialog.Accepted:
+                return False
+
+            if dialog.choice == ConflictResolutionDialog.KEEP_EXISTING:
+                working_current.sessions = normalize_sessions(
+                    subtract_interval(working_current.sessions, overlap_begin, overlap_end, now),
+                    now,
+                )
+                working_current.is_active = bool(
+                    working_current.sessions and working_current.sessions[-1].end is None
+                )
+                continue
+
+            override_task = deepcopy(working_overrides.get(conflicting_task.id, conflicting_task))
+            override_task.sessions = normalize_sessions(
+                subtract_interval(override_task.sessions, overlap_begin, overlap_end, now),
+                now,
+            )
+            override_task.is_active = bool(override_task.sessions and override_task.sessions[-1].end is None)
+            working_overrides[override_task.id] = override_task
+
+        task.name = working_current.name
+        task.sessions = working_current.sessions
+        task.is_active = working_current.is_active
+
+        tasks_to_save = [task]
+        for override in working_overrides.values():
+            real_task = self.find_task_by_id(override.id)
+            if real_task is None:
+                continue
+            real_task.name = override.name
+            real_task.sessions = override.sessions
+            real_task.is_active = override.is_active
+            real_task.completed_at = override.completed_at
+            tasks_to_save.append(real_task)
+
+        self.repository.save_tasks(tasks_to_save)
+        return True
+
+    def find_first_conflict(self, working_current: Task, working_overrides, now):
+        for current_session in working_current.sessions:
+            current_end = effective_end(current_session, now)
+            for other_task in self.all_tasks():
+                if other_task.id == working_current.id:
+                    continue
+
+                comparison_task = working_overrides.get(other_task.id, other_task)
+                for other_session in comparison_task.sessions:
+                    other_end = effective_end(other_session, now)
+                    overlap_begin = max(current_session.begin, other_session.begin)
+                    overlap_end = min(current_end, other_end)
+                    if overlap_begin < overlap_end:
+                        return comparison_task, overlap_begin, overlap_end
+        return None
+
+    def find_task_by_id(self, task_id):
+        for task in self.all_tasks():
+            if task.id == task_id:
+                return task
+        return None
+
     def refresh_display(self):
         self.active_tab.refresh_preserving_selection()
         self.completed_tab.refresh_preserving_selection()
@@ -396,11 +485,9 @@ class MainWindow(QMainWindow):
         self.resume_selected_task()
 
     def edit_task(self, task: Task):
-        dialog = TaskEditDialog(task, self)
+        dialog = TaskEditDialog(task, self.apply_task_edits, self)
         if dialog.exec() != QDialog.Accepted:
             return
-
-        self.persist_task(task)
 
         self.active_tab.refresh()
         self.completed_tab.refresh()
