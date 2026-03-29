@@ -82,7 +82,7 @@ class TaskTab(QWidget):
         super().__init__(parent)
         self.name = name
         self._all_tasks = list(tasks or [])
-        self._filtered_tasks = self._all_tasks.copy()
+        self._filtered_tasks = self._sort_tasks_by_last_activity(self._all_tasks.copy())
         layout = QVBoxLayout(self)
         self.table = QTableView()
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
