@@ -264,7 +264,7 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.active_tab = TaskTab("Active", tasks=self.repository.list_active_tasks())
         self.completed_tab = TaskTab("Completed", tasks=self.repository.list_completed_tasks())
-        self.reports_tab = ReportsPane()
+        self.reports_tab = ReportsPane(connection=self.connection)
         self.tabs.addTab(self.active_tab, "Active")
         self.tabs.addTab(self.completed_tab, "Completed")
         self.tabs.addTab(self.reports_tab, "Reports")
