@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Chrona
+Comment=A small and hopefully simple time tracker
+Exec=@HOME@/.local/bin/chrona
+Icon=chrona
+Terminal=false
+Categories=Office;Utility;
+Keywords=time;tracker;productivity;
+StartupNotify=true

@@ -1,6 +1,6 @@
 # Chrona
 
-Chrona is a Linux desktop time tracker built with Python, PySide6, and SQLite. It is designed around a simple workflow: start an activity, let Chrona track time locally, pause or complete it when you are done, and review totals in the reports tab.
+Chrona is a small and hopefully simple Linux desktop time tracker built with Python, PySide6, and SQLite. It is designed around a straightforward workflow: start an activity, let Chrona track time locally, pause or complete it when you are done, and review totals in the reports tab.
 
 ## What It Does
 
@@ -70,6 +70,25 @@ On first launch, Chrona creates its local data directory and applies any SQL mig
 PYTHONPATH=src pytest
 ```
 
+## Linux Launcher Installation
+
+Chrona includes a Freedesktop `.desktop` launcher that works across KDE, GNOME, Xfce, and other Linux desktop environments.
+
+To install it for your current user:
+
+```bash
+chmod +x scripts/install-linux-launcher.sh
+./scripts/install-linux-launcher.sh
+```
+
+This installs:
+
+- a launcher wrapper at `~/.local/bin/chrona`
+- a desktop entry at `~/.local/share/applications/chrona.desktop`
+- an icon at `~/.local/share/icons/hicolor/256x256/apps/chrona.png`
+
+The wrapper prefers the repository's `.venv/bin/python` when present and falls back to `python3`.
+
 ## Data Storage
 
 Chrona stores its database at:
@@ -96,4 +115,4 @@ Schema changes are managed through the SQL files in `migrations/`.
 
 ## License
 
-No license file is currently included in this repository.
+Chrona is released under the MIT License. See [LICENSE](/home/paulo/src/chrona/LICENSE).

@@ -233,7 +233,7 @@ class MainWindow(QMainWindow):
         self.connection = connect_database()
         ensure_schema(self.connection)
         self.repository = TaskRepository(self.connection)
-        self.setWindowTitle("Chrona - Time Tracking, Simplified")
+        self.setWindowTitle("Chrona - A small and hopefully simple time tracker")
         self.resize(800, 600)
         self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
 
