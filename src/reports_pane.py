@@ -131,7 +131,7 @@ class ReportsPane(QWidget):
         # Top controls
         top = QHBoxLayout()
         self.type_combo = QComboBox()
-        self.type_combo.addItems(["Daily", "Weekly"])
+        self.type_combo.addItems(["Daily", "Weekly", "Monthly"])
         self.type_combo.setCurrentText(self.state["report_type"])
         self.type_combo.currentTextChanged.connect(self._on_type_changed)
         self.prev_btn = QPushButton("←")
@@ -216,6 +216,9 @@ class ReportsPane(QWidget):
         self.state["report_type"] = value
         if value == "Daily":
             self.state["period_start"] = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        elif value == "Monthly":
+            now = datetime.now()
+            self.state["period_start"] = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         else:
             self.state["period_start"] = self._get_current_week_start()
         self._refresh_report()
@@ -223,6 +226,10 @@ class ReportsPane(QWidget):
     def _on_prev(self):
         if self.state["report_type"] == "Daily":
             self.state["period_start"] -= timedelta(days=1)
+        elif self.state["report_type"] == "Monthly":
+            current = self.state["period_start"]
+            previous_month_last_day = current.replace(day=1) - timedelta(days=1)
+            self.state["period_start"] = previous_month_last_day.replace(day=1)
         else:
             self.state["period_start"] -= timedelta(days=7)
         self._refresh_report()
@@ -230,6 +237,12 @@ class ReportsPane(QWidget):
     def _on_next(self):
         if self.state["report_type"] == "Daily":
             self.state["period_start"] += timedelta(days=1)
+        elif self.state["report_type"] == "Monthly":
+            current = self.state["period_start"]
+            if current.month == 12:
+                self.state["period_start"] = current.replace(year=current.year + 1, month=1, day=1)
+            else:
+                self.state["period_start"] = current.replace(month=current.month + 1, day=1)
         else:
             self.state["period_start"] += timedelta(days=7)
         self._refresh_report()
@@ -249,6 +262,8 @@ class ReportsPane(QWidget):
     def _format_period_label(self):
         if self.state["report_type"] == "Daily":
             return self.state["period_start"].strftime("%b %d, %Y")
+        if self.state["report_type"] == "Monthly":
+            return self.state["period_start"].strftime("%b %Y")
         else:
             start = self.state["period_start"]
             end = start + timedelta(days=6)
