@@ -1,7 +1,7 @@
 
 from dataclasses import dataclass, field
 from typing import Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime
 
 @dataclass
 class Session:
@@ -41,6 +41,14 @@ class Task:
             self.sessions[-1].end = stop
         self.is_active = False
 
+    def _last_session(self) -> Optional[Session]:
+        if not self.sessions:
+            return None
+        return self.sessions[-1]
+
+    def _today_start(self) -> datetime:
+        return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
     @property
     def total_time(self) -> int:
         """Total time in minutes across all sessions."""
@@ -51,25 +59,49 @@ class Task:
             total += (seconds // 60)
         return total
 
+    def minutes_since(self, period_start: datetime, period_end: Optional[datetime] = None) -> int:
+        total = 0
+        now = datetime.now()
+        effective_period_end = period_end or now
+
+        for session in self.sessions:
+            session_end = session.end if session.end is not None else now
+            overlap_begin = max(session.begin, period_start)
+            overlap_end = min(session_end, effective_period_end)
+            if overlap_begin >= overlap_end:
+                continue
+            total += int((overlap_end - overlap_begin).total_seconds()) // 60
+
+        return total
+
+    @property
+    def today_time(self) -> int:
+        return self.minutes_since(self._today_start())
+
     @property
     def last_activity(self) -> Optional[datetime]:
-        if not self.sessions:
+        last = self._last_session()
+        if last is None:
             return None
-        last = self.sessions[-1]
         return last.end if last.end else last.begin
 
     @property
     def last_activity_type(self) -> Optional[str]:
-        if not self.sessions:
+        last = self._last_session()
+        if last is None:
             return None
 
-        return "pause" if self.sessions[-1].end else ("resume" if len(self.sessions) > 1 else "started")
+        return "pause" if last.end else ("resume" if len(self.sessions) > 1 else "started")
 
     @property
     def last_activity_display(self) -> str:
-        if self.sessions:
-            session = self.sessions[-1]
+        session = self._last_session()
+        if session is not None:
+            today = datetime.now().date()
+            prefix = ""
+            if session.begin.date() != today:
+                prefix = f"{session.begin.strftime('%b %d')} "
             begin = session.begin.strftime('%H:%M')
             end = session.end.strftime('%H:%M') if session.end else 'Now'
-            return f"{begin} - {end}"
+            return f"{prefix}{begin} - {end}"
         return ""

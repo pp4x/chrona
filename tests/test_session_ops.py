@@ -8,7 +8,8 @@ def dt(hour, minute=0):
     return datetime(2026, 3, 24, hour, minute)
 
 
-def test_subtract_interval_without_overlap_keeps_session():
+def test_subtract_keeps_session():
+    """A non-overlapping interval leaves the session unchanged."""
     sessions = [Session(begin=dt(9), end=dt(10))]
 
     updated = subtract_interval(sessions, dt(10), dt(11), dt(12))
@@ -16,7 +17,8 @@ def test_subtract_interval_without_overlap_keeps_session():
     assert updated == [Session(begin=dt(9), end=dt(10))]
 
 
-def test_subtract_interval_trims_left_edge():
+def test_subtract_trims_left():
+    """Subtracting the left edge shifts the session start forward."""
     sessions = [Session(begin=dt(9), end=dt(12))]
 
     updated = subtract_interval(sessions, dt(9), dt(10), dt(12))
@@ -24,7 +26,8 @@ def test_subtract_interval_trims_left_edge():
     assert updated == [Session(begin=dt(10), end=dt(12))]
 
 
-def test_subtract_interval_trims_right_edge():
+def test_subtract_trims_right():
+    """Subtracting the right edge shortens the session end."""
     sessions = [Session(begin=dt(9), end=dt(12))]
 
     updated = subtract_interval(sessions, dt(11), dt(12), dt(12))
@@ -32,7 +35,8 @@ def test_subtract_interval_trims_right_edge():
     assert updated == [Session(begin=dt(9), end=dt(11))]
 
 
-def test_subtract_interval_splits_middle():
+def test_subtract_splits_middle():
+    """Subtracting from the middle splits the session into two parts."""
     sessions = [Session(begin=dt(9), end=dt(12))]
 
     updated = subtract_interval(sessions, dt(10), dt(11), dt(12))
@@ -43,7 +47,8 @@ def test_subtract_interval_splits_middle():
     ]
 
 
-def test_subtract_interval_removes_fully_covered_session():
+def test_subtract_removes_session():
+    """A fully covered session is removed entirely."""
     sessions = [Session(begin=dt(9), end=dt(10))]
 
     updated = subtract_interval(sessions, dt(8), dt(11), dt(12))
@@ -51,7 +56,8 @@ def test_subtract_interval_removes_fully_covered_session():
     assert updated == []
 
 
-def test_normalize_sessions_merges_touching_segments_after_subtraction():
+def test_normalize_keeps_touching():
+    """Touching segments remain separate."""
     sessions = [
         Session(begin=dt(9), end=dt(10)),
         Session(begin=dt(10), end=dt(11)),
@@ -59,4 +65,19 @@ def test_normalize_sessions_merges_touching_segments_after_subtraction():
 
     normalized = normalize_sessions(sessions, dt(12))
 
-    assert normalized == [Session(begin=dt(9), end=dt(11))]
+    assert normalized == [
+        Session(begin=dt(9), end=dt(10)),
+        Session(begin=dt(10), end=dt(11)),
+    ]
+
+
+def test_normalize_keeps_adjacent_sessions():
+    """Adjacent sessions remain separate instead of expanding the earlier begin."""
+    sessions = [
+        Session(begin=dt(8, 30), end=dt(9)),
+        Session(begin=dt(9), end=dt(9, 30)),
+    ]
+
+    normalized = normalize_sessions(sessions, dt(12))
+
+    assert normalized == sessions

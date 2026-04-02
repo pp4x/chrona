@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QAbstractTableModel, QAbstractItemModel, QModelIndex
 from datetime import datetime, timedelta
+from formatting import format_minutes
 from report_details_dialog import ReportDetailsDialog
 
 class ReportDataAdapter:
@@ -249,13 +250,6 @@ class ReportTreeModel(QAbstractItemModel):
             return ["Name", "Time"][section]
         return None
 
-# --- Utility ---
-def format_minutes(minutes):
-    h, m = divmod(minutes, 60)
-    if h:
-        return f"{h}h {m:02d}m" if m else f"{h}h"
-    return f"{m}m"
-
 # --- Reports Pane Widget ---
 class ReportsPane(QWidget):
     def __init__(self, connection=None, parent=None):
@@ -270,6 +264,10 @@ class ReportsPane(QWidget):
         }
         self._init_ui()
         self._current_data = []
+        self._refresh_report()
+
+    def refresh(self):
+        self._populate_categories()
         self._refresh_report()
 
     def _init_ui(self):

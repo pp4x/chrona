@@ -24,7 +24,7 @@ def normalize_sessions(sessions: list[Session], now: datetime) -> list[Session]:
         previous = merged[-1]
         previous_end = effective_end(previous, now)
 
-        if session.begin <= previous_end:
+        if session.begin < previous_end:
             previous.begin = min(previous.begin, session.begin)
             if previous.end is None or session.end is None:
                 previous.end = None

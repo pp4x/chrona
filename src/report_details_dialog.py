@@ -8,6 +8,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from formatting import format_minutes
+
 
 class ReportDetailsDialog(QDialog):
     def __init__(self, title, period_label, subtitle, headers, rows, total_minutes, parent=None):
@@ -35,16 +37,10 @@ class ReportDetailsDialog(QDialog):
         table.resizeColumnsToContents()
         layout.addWidget(table)
 
-        layout.addWidget(QLabel(f"Total: {self._format_minutes(total_minutes)}"))
+        layout.addWidget(QLabel(f"Total: {format_minutes(total_minutes)}"))
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.reject)
         buttons.accepted.connect(self.accept)
         buttons.button(QDialogButtonBox.Close).clicked.connect(self.accept)
         layout.addWidget(buttons)
-
-    def _format_minutes(self, minutes):
-        h, m = divmod(minutes, 60)
-        if h:
-            return f"{h}h {m:02d}m" if m else f"{h}h"
-        return f"{m}m"

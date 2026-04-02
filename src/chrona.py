@@ -5,11 +5,13 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QTabWidget, QVBoxLayout, QHBoxLayout,
     QToolBar, QPushButton, QLineEdit, QLabel, QTableView, QAbstractItemView, QHeaderView,
+    QCheckBox,
     QDialog, QDialogButtonBox, QMessageBox, QSizePolicy
 )
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, Signal, QTimer
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from db import connect_database, ensure_schema
+from formatting import format_minutes
 from reports_pane import ReportsPane
 from Task import Task
 from repository import TaskRepository
@@ -19,19 +21,12 @@ from task_edit_dialog import TaskEditDialog
 
 APP_ICON_PATH = Path(__file__).resolve().parent.parent / "icons" / "chrona.png"
 
-
-# --- Utility for time formatting ---
-def format_minutes(minutes):
-    h, m = divmod(minutes, 60)
-    if h:
-        return f"{h}h {m:02d}m" if m else f"{h}h"
-    return f"{m}m"
-
 # --- Task Table Model ---
 class TaskTableModel(QAbstractTableModel):
     def __init__(self, tasks):
         super().__init__()
         self._tasks = tasks
+        self._today_only = False
 
     def rowCount(self, parent=QModelIndex()):
         return len(self._tasks)
@@ -46,7 +41,8 @@ class TaskTableModel(QAbstractTableModel):
         if index.column() == 0:
             return task.name
         elif index.column() == 1:
-            return format_minutes(task.total_time)
+            minutes = task.today_time if self._today_only else task.total_time
+            return format_minutes(minutes)
         elif index.column() == 2:
             return task.last_activity_display
         return None
@@ -63,8 +59,15 @@ class TaskTableModel(QAbstractTableModel):
         self._tasks = tasks
         self.endResetModel()
 
+    def set_today_only(self, today_only):
+        if self._today_only == today_only:
+            return
+        self.beginResetModel()
+        self._today_only = today_only
+        self.endResetModel()
+
 class FilterBar(QWidget):
-    def __init__(self, on_filter_applied, parent=None):
+    def __init__(self, on_filter_applied, on_today_only_toggled=None, parent=None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
         self.filter_label = QLabel("Filter:")
@@ -73,14 +76,21 @@ class FilterBar(QWidget):
         self.filter_input.returnPressed.connect(lambda: on_filter_applied(self.filter_input.text()))
         layout.addWidget(self.filter_label)
         layout.addWidget(self.filter_input)
+        self.today_only_checkbox = None
+        if on_today_only_toggled is not None:
+            self.today_only_checkbox = QCheckBox("Today only")
+            self.today_only_checkbox.toggled.connect(on_today_only_toggled)
+            layout.addWidget(self.today_only_checkbox)
         self.setLayout(layout)
+
 class TaskTab(QWidget):
     selection_changed = Signal()
     task_double_clicked = Signal(object)
 
-    def __init__(self, name, tasks=None, parent=None):
+    def __init__(self, name, tasks=None, show_today_only_filter=False, parent=None):
         super().__init__(parent)
         self.name = name
+        self._today_only = False
         self._all_tasks = list(tasks or [])
         self._filtered_tasks = self._sort_tasks_by_last_activity(self._all_tasks.copy())
         layout = QVBoxLayout(self)
@@ -92,7 +102,10 @@ class TaskTab(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.selectionModel().selectionChanged.connect(self._emit_selection_changed)
         self.table.doubleClicked.connect(self._handle_double_click)
-        self.filter_bar = FilterBar(self.apply_filter)
+        self.filter_bar = FilterBar(
+            self.apply_filter,
+            self.set_today_only if show_today_only_filter else None,
+        )
         layout.addWidget(self.table)
         layout.addWidget(self.filter_bar)
         self.setLayout(layout)
@@ -136,6 +149,8 @@ class TaskTab(QWidget):
             filtered_tasks = self._all_tasks.copy()
         else:
             filtered_tasks = [task for task in self._all_tasks if t in task.name.lower()]
+        if self._today_only:
+            filtered_tasks = [task for task in filtered_tasks if task.today_time > 0]
         self._filtered_tasks = self._sort_tasks_by_last_activity(filtered_tasks)
         self.model.update_tasks(self._filtered_tasks)
         self.table.clearSelection()
@@ -176,6 +191,11 @@ class TaskTab(QWidget):
         if not index.isValid():
             return
         self.task_double_clicked.emit(self._filtered_tasks[index.row()])
+
+    def set_today_only(self, today_only):
+        self._today_only = today_only
+        self.model.set_today_only(today_only)
+        self.apply_filter(self.filter_bar.filter_input.text())
 
 class MainWindow(QMainWindow):
     @staticmethod
@@ -262,7 +282,11 @@ class MainWindow(QMainWindow):
 
         # Tabs
         self.tabs = QTabWidget()
-        self.active_tab = TaskTab("Active", tasks=self.repository.list_active_tasks())
+        self.active_tab = TaskTab(
+            "Active",
+            tasks=self.repository.list_active_tasks(),
+            show_today_only_filter=True,
+        )
         self.completed_tab = TaskTab("Completed", tasks=self.repository.list_completed_tasks())
         self.reports_tab = ReportsPane(connection=self.connection)
         self.tabs.addTab(self.active_tab, "Active")
@@ -270,7 +294,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.reports_tab, "Reports")
 
         self.setCentralWidget(self.tabs)
-        self.tabs.currentChanged.connect(self.update_toolbar_state)
+        self.tabs.currentChanged.connect(self.on_tab_changed)
         self.active_tab.selection_changed.connect(self.update_toolbar_state)
         self.completed_tab.selection_changed.connect(self.update_toolbar_state)
         self.active_tab.task_double_clicked.connect(self.edit_task)
@@ -383,6 +407,12 @@ class MainWindow(QMainWindow):
     def refresh_display(self):
         self.active_tab.refresh_preserving_selection()
         self.completed_tab.refresh_preserving_selection()
+        self.reports_tab.refresh()
+        self.update_toolbar_state()
+
+    def on_tab_changed(self, _index):
+        if self.tabs.currentWidget() is self.reports_tab:
+            self.reports_tab.refresh()
         self.update_toolbar_state()
 
     def update_toolbar_state(self):
