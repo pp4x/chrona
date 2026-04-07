@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QAbstractTableModel, QAbstractItemModel, QModelIndex
 from datetime import datetime, timedelta
-from formatting import format_minutes
+from formatting import format_minutes, format_seconds_as_minutes
 from report_details_dialog import ReportDetailsDialog
 
 class ReportDataAdapter:
@@ -37,10 +37,10 @@ class ReportDataAdapter:
                 {
                     "name": row["name"],
                     "project": row["project"] or "(unassigned)",
-                    "time": 0,
+                    "time": 0.0,
                 },
             )
-            task_entry["time"] += row["minutes"]
+            task_entry["time"] += row["seconds"]
 
         task_rows = sorted(task_totals.values(), key=lambda row: (-row["time"], row["name"].lower()))
         if group_by == "Task":
@@ -74,7 +74,7 @@ class ReportDataAdapter:
             detail_slices = [row for row in slices if (row["project"] or "(unassigned)") == value]
 
         detail_slices.sort(key=lambda row: (row["begin"], row["end"]), reverse=True)
-        total_minutes = sum(row["minutes"] for row in detail_slices)
+        total_seconds = sum(row["seconds"] for row in detail_slices)
 
         if group_by == "Task":
             rows = [
@@ -82,7 +82,7 @@ class ReportDataAdapter:
                     row["begin"].strftime("%b %d"),
                     row["begin"].strftime("%H:%M"),
                     row["end"].strftime("%H:%M") if row["is_ongoing"] is False else row["end_display"],
-                    format_minutes(row["minutes"]),
+                    format_seconds_as_minutes(row["seconds"]),
                 ]
                 for row in detail_slices
             ]
@@ -94,13 +94,13 @@ class ReportDataAdapter:
                     row["begin"].strftime("%b %d"),
                     row["begin"].strftime("%H:%M"),
                     row["end"].strftime("%H:%M") if row["is_ongoing"] is False else row["end_display"],
-                    format_minutes(row["minutes"]),
+                    format_seconds_as_minutes(row["seconds"]),
                 ]
                 for row in detail_slices
             ]
             headers = ["Task", "Date", "Begin", "End", "Duration"]
 
-        return headers, rows, total_minutes
+        return headers, rows, total_seconds
 
     def _session_slices(self, period_type, period_start, category, text_filter):
         period_end = self._get_period_end(period_type, period_start)
@@ -138,9 +138,7 @@ class ReportDataAdapter:
             if overlap_begin >= overlap_end:
                 continue
 
-            minutes = int((overlap_end - overlap_begin).total_seconds() // 60)
-            if minutes <= 0:
-                continue
+            seconds = (overlap_end - overlap_begin).total_seconds()
 
             slices.append(
                 {
@@ -148,7 +146,7 @@ class ReportDataAdapter:
                     "project": row["project"],
                     "begin": overlap_begin,
                     "end": overlap_end,
-                    "minutes": minutes,
+                    "seconds": seconds,
                     "is_ongoing": row["end_at"] is None and overlap_end == now,
                     "end_display": "Now",
                 }
@@ -183,7 +181,7 @@ class ReportTableModel(QAbstractTableModel):
         if index.column() == 0:
             return row["name"]
         elif index.column() == 1:
-            return format_minutes(row["time"])
+            return format_seconds_as_minutes(row["time"])
         return None
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
@@ -235,12 +233,12 @@ class ReportTreeModel(QAbstractItemModel):
             if index.column() == 0:
                 return item["project"]
             elif index.column() == 1:
-                return format_minutes(item["total"])
+                return format_seconds_as_minutes(item["total"])
         else:
             if index.column() == 0:
                 return item["name"]
             elif index.column() == 1:
-                return format_minutes(item["time"])
+                return format_seconds_as_minutes(item["time"])
         return None
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
@@ -361,7 +359,7 @@ class ReportsPane(QWidget):
             self.tree_view.setModel(model)
             self.results_stack.setCurrentWidget(self.tree_view)
             total = sum(group["total"] for group in data)
-        self.total_label.setText(f"Total: {format_minutes(total)}")
+        self.total_label.setText(f"Total: {format_seconds_as_minutes(total)}")
 
     def _on_type_changed(self, value):
         self.state["report_type"] = value
@@ -472,7 +470,7 @@ class ReportsPane(QWidget):
         self._show_details_dialog("Task", item["name"])
 
     def _show_details_dialog(self, detail_type, value):
-        headers, rows, total_minutes = self.adapter.get_detail_rows(
+        headers, rows, total_seconds = self.adapter.get_detail_rows(
             self.state["report_type"],
             self.state["period_start"],
             self.state["category"],
@@ -486,7 +484,7 @@ class ReportsPane(QWidget):
             self._format_period_label(),
             headers,
             rows,
-            total_minutes,
+            total_seconds,
             self,
         )
         dialog.exec()

@@ -8,9 +8,6 @@ class Session:
     begin: datetime
     end: Optional[datetime] = None
 
-def truncate_to_minute(value: datetime) -> datetime:
-    return value.replace(second=0, microsecond=0)
-
 @dataclass
 class Task:
     name: str  # Full normalized task string, includes @category and #project if present
@@ -27,7 +24,7 @@ class Task:
             start = datetime.now()
         if self.sessions:
             previous_session = self.sessions[-1]
-            if previous_session.end is not None and truncate_to_minute(previous_session.end) == truncate_to_minute(start):
+            if previous_session.end is not None and previous_session.end == start:
                 previous_session.end = None
                 self.is_active = True
                 return
@@ -74,9 +71,26 @@ class Task:
 
         return total
 
+    def overlaps_period(self, period_start: datetime, period_end: Optional[datetime] = None) -> bool:
+        now = datetime.now()
+        effective_period_end = period_end or now
+
+        for session in self.sessions:
+            session_end = session.end if session.end is not None else now
+            overlap_begin = max(session.begin, period_start)
+            overlap_end = min(session_end, effective_period_end)
+            if overlap_begin < overlap_end:
+                return True
+
+        return False
+
     @property
     def today_time(self) -> int:
         return self.minutes_since(self._today_start())
+
+    @property
+    def has_today_activity(self) -> bool:
+        return self.overlaps_period(self._today_start())
 
     @property
     def last_activity(self) -> Optional[datetime]:

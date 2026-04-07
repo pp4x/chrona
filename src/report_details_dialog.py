@@ -8,11 +8,11 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from formatting import format_minutes
+from formatting import format_seconds_as_minutes
 
 
 class ReportDetailsDialog(QDialog):
-    def __init__(self, title, period_label, subtitle, headers, rows, total_minutes, parent=None):
+    def __init__(self, title, period_label, subtitle, headers, rows, total_seconds, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Report Details")
         self.resize(720, 420)
@@ -37,7 +37,7 @@ class ReportDetailsDialog(QDialog):
         table.resizeColumnsToContents()
         layout.addWidget(table)
 
-        layout.addWidget(QLabel(f"Total: {format_minutes(total_minutes)}"))
+        layout.addWidget(QLabel(f"Total: {format_seconds_as_minutes(total_seconds)}"))
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.reject)

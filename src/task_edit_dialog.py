@@ -71,7 +71,7 @@ class TaskEditDialog(QDialog):
 
     def _insert_session_row(self, begin=None, end=None, row=0):
         if begin is None:
-            begin = datetime.now().replace(second=0, microsecond=0)
+            begin = datetime.now()
 
         self.sessions_table.insertRow(row)
         begin_edit = self._create_datetime_edit(begin)
@@ -104,7 +104,7 @@ class TaskEditDialog(QDialog):
         layout = QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        end_edit = self._create_datetime_edit(end or datetime.now().replace(second=0, microsecond=0))
+        end_edit = self._create_datetime_edit(end or datetime.now())
         open_checkbox = QCheckBox("Open", container)
         open_checkbox.setChecked(end is None)
         end_edit.setEnabled(end is not None)

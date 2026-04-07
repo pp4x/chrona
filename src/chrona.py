@@ -150,7 +150,7 @@ class TaskTab(QWidget):
         else:
             filtered_tasks = [task for task in self._all_tasks if t in task.name.lower()]
         if self._today_only:
-            filtered_tasks = [task for task in filtered_tasks if task.today_time > 0]
+            filtered_tasks = [task for task in filtered_tasks if task.has_today_activity]
         self._filtered_tasks = self._sort_tasks_by_last_activity(filtered_tasks)
         self.model.update_tasks(self._filtered_tasks)
         self.table.clearSelection()
