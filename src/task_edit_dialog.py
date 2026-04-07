@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from Task import Session, Task
-from session_ops import normalize_sessions
+from session_ops import coalesce_sessions, normalize_sessions
 
 
 class TaskEditDialog(QDialog):
@@ -51,8 +51,11 @@ class TaskEditDialog(QDialog):
         self.add_session_btn.clicked.connect(self.add_session_row)
         self.delete_session_btn = QPushButton("Delete Session")
         self.delete_session_btn.clicked.connect(self.delete_selected_sessions)
+        self.coalesce_sessions_btn = QPushButton("Coalesce Selected Sessions")
+        self.coalesce_sessions_btn.clicked.connect(self.coalesce_selected_sessions)
         button_row.addWidget(self.add_session_btn)
         button_row.addWidget(self.delete_session_btn)
+        button_row.addWidget(self.coalesce_sessions_btn)
         button_row.addStretch()
         layout.addLayout(button_row)
 
@@ -62,12 +65,14 @@ class TaskEditDialog(QDialog):
         layout.addWidget(buttons)
 
         self._populate_sessions()
+        self.sessions_table.selectionModel().selectionChanged.connect(self._refresh_action_buttons)
 
     def _populate_sessions(self):
         self.sessions_table.setRowCount(0)
         for session in self.task.sessions:
             self._insert_session_row(session.begin, session.end)
         self._refresh_open_controls()
+        self._refresh_action_buttons()
 
     def _insert_session_row(self, begin=None, end=None, row=0):
         if begin is None:
@@ -82,15 +87,34 @@ class TaskEditDialog(QDialog):
         self._insert_session_row()
         self.sessions_table.selectRow(0)
         self._refresh_open_controls()
+        self._refresh_action_buttons()
 
     def delete_selected_sessions(self):
-        selected_rows = sorted(
-            {index.row() for index in self.sessions_table.selectionModel().selectedRows()},
-            reverse=True,
-        )
+        selected_rows = sorted(self._selected_rows(), reverse=True)
         for row in selected_rows:
             self.sessions_table.removeRow(row)
         self._refresh_open_controls()
+        self._refresh_action_buttons()
+
+    def coalesce_selected_sessions(self):
+        selected_rows = sorted(self._selected_rows())
+        if len(selected_rows) != 2:
+            return
+
+        first_row, second_row = selected_rows
+        merged = coalesce_sessions(
+            Session(begin=self._begin_value(first_row), end=self._end_value(first_row)),
+            Session(begin=self._begin_value(second_row), end=self._end_value(second_row)),
+        )
+
+        for row in reversed(selected_rows):
+            self.sessions_table.removeRow(row)
+
+        insert_row = min(selected_rows)
+        self._insert_session_row(merged.begin, merged.end, insert_row)
+        self.sessions_table.selectRow(insert_row)
+        self._refresh_open_controls()
+        self._refresh_action_buttons()
 
     def _create_datetime_edit(self, value):
         editor = QDateTimeEdit(self)
@@ -130,6 +154,14 @@ class TaskEditDialog(QDialog):
             if not is_top_row:
                 open_checkbox.setChecked(False)
                 end_edit.setEnabled(True)
+
+    def _refresh_action_buttons(self, *_args):
+        selected_count = len(self._selected_rows())
+        self.delete_session_btn.setEnabled(selected_count > 0)
+        self.coalesce_sessions_btn.setEnabled(selected_count == 2)
+
+    def _selected_rows(self):
+        return {index.row() for index in self.sessions_table.selectionModel().selectedRows()}
 
     def _to_qdatetime(self, value):
         return QDateTime(

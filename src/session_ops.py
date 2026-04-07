@@ -9,6 +9,13 @@ def effective_end(session: Session, now: datetime) -> datetime:
     return session.end or now
 
 
+def coalesce_sessions(first: Session, second: Session) -> Session:
+    return Session(
+        begin=min(first.begin, second.begin),
+        end=max(first.end, second.end) if first.end is not None and second.end is not None else None,
+    )
+
+
 def normalize_sessions(sessions: list[Session], now: datetime) -> list[Session]:
     ordered = sorted(
         sessions,

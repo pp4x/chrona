@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from Task import Session
-from session_ops import normalize_sessions, subtract_interval
+from session_ops import coalesce_sessions, normalize_sessions, subtract_interval
 
 
 def dt(hour, minute=0):
@@ -81,3 +81,21 @@ def test_normalize_keeps_adjacent_sessions():
     normalized = normalize_sessions(sessions, dt(12))
 
     assert normalized == sessions
+
+
+def test_coalesce_sessions_spans_selected_range():
+    merged = coalesce_sessions(
+        Session(begin=dt(9), end=dt(10)),
+        Session(begin=dt(11), end=dt(12)),
+    )
+
+    assert merged == Session(begin=dt(9), end=dt(12))
+
+
+def test_coalesce_sessions_keeps_open_end():
+    merged = coalesce_sessions(
+        Session(begin=dt(9), end=dt(10)),
+        Session(begin=dt(11), end=None),
+    )
+
+    assert merged == Session(begin=dt(9), end=None)
