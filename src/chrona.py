@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, Signal, QTimer
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from db import connect_database, ensure_schema
-from formatting import format_minutes
+from formatting import format_seconds_as_minutes
 from reports_pane import ReportsPane
 from Task import Task
 from repository import TaskRepository
@@ -41,8 +41,8 @@ class TaskTableModel(QAbstractTableModel):
         if index.column() == 0:
             return task.name
         elif index.column() == 1:
-            minutes = task.today_time if self._today_only else task.total_time
-            return format_minutes(minutes)
+            seconds = task.today_seconds if self._today_only else task.total_seconds
+            return format_seconds_as_minutes(seconds)
         elif index.column() == 2:
             return task.last_activity_display
         return None
@@ -106,9 +106,12 @@ class TaskTab(QWidget):
             self.apply_filter,
             self.set_today_only if show_today_only_filter else None,
         )
+        self.total_label = QLabel()
         layout.addWidget(self.table)
         layout.addWidget(self.filter_bar)
+        layout.addWidget(self.total_label)
         self.setLayout(layout)
+        self._refresh_total_label()
 
     def add_task(self, task: Task):
         self._all_tasks.append(task)
@@ -153,6 +156,7 @@ class TaskTab(QWidget):
             filtered_tasks = [task for task in filtered_tasks if task.has_today_activity]
         self._filtered_tasks = self._sort_tasks_by_last_activity(filtered_tasks)
         self.model.update_tasks(self._filtered_tasks)
+        self._refresh_total_label()
         self.table.clearSelection()
         self._emit_selection_changed()
 
@@ -196,6 +200,13 @@ class TaskTab(QWidget):
         self._today_only = today_only
         self.model.set_today_only(today_only)
         self.apply_filter(self.filter_bar.filter_input.text())
+
+    def _refresh_total_label(self):
+        total_seconds = sum(
+            task.today_seconds if self._today_only else task.total_seconds
+            for task in self._filtered_tasks
+        )
+        self.total_label.setText(f"Total: {format_seconds_as_minutes(total_seconds)}")
 
 class MainWindow(QMainWindow):
     @staticmethod

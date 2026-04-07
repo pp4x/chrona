@@ -47,17 +47,20 @@ class Task:
         return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
     @property
-    def total_time(self) -> int:
-        """Total time in minutes across all sessions."""
-        total = 0
+    def total_seconds(self) -> float:
+        total = 0.0
         for session in self.sessions:
             end = session.end if session.end is not None else datetime.now()
-            seconds = int((end - session.begin).total_seconds())
-            total += (seconds // 60)
+            total += (end - session.begin).total_seconds()
         return total
 
-    def minutes_since(self, period_start: datetime, period_end: Optional[datetime] = None) -> int:
-        total = 0
+    @property
+    def total_time(self) -> int:
+        """Total time in minutes across all sessions."""
+        return int(self.total_seconds // 60)
+
+    def seconds_since(self, period_start: datetime, period_end: Optional[datetime] = None) -> float:
+        total = 0.0
         now = datetime.now()
         effective_period_end = period_end or now
 
@@ -67,9 +70,12 @@ class Task:
             overlap_end = min(session_end, effective_period_end)
             if overlap_begin >= overlap_end:
                 continue
-            total += int((overlap_end - overlap_begin).total_seconds()) // 60
+            total += (overlap_end - overlap_begin).total_seconds()
 
         return total
+
+    def minutes_since(self, period_start: datetime, period_end: Optional[datetime] = None) -> int:
+        return int(self.seconds_since(period_start, period_end) // 60)
 
     def overlaps_period(self, period_start: datetime, period_end: Optional[datetime] = None) -> bool:
         now = datetime.now()
@@ -87,6 +93,10 @@ class Task:
     @property
     def today_time(self) -> int:
         return self.minutes_since(self._today_start())
+
+    @property
+    def today_seconds(self) -> float:
+        return self.seconds_since(self._today_start())
 
     @property
     def has_today_activity(self) -> bool:

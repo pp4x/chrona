@@ -48,4 +48,24 @@ def test_has_today_activity_for_sub_minute_session():
     )
 
     assert task.today_time == 0
+    assert task.today_seconds == 30.0
     assert task.has_today_activity is True
+
+
+def test_total_seconds_keeps_sub_minute_precision():
+    task = Task(
+        "demo",
+        sessions=[
+            Session(
+                begin=datetime(2026, 3, 24, 9, 0, 0),
+                end=datetime(2026, 3, 24, 9, 0, 30),
+            ),
+            Session(
+                begin=datetime(2026, 3, 24, 10, 0, 0),
+                end=datetime(2026, 3, 24, 10, 0, 45),
+            ),
+        ],
+    )
+
+    assert task.total_time == 1
+    assert task.total_seconds == 75.0
