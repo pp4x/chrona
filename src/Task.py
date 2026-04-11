@@ -46,6 +46,24 @@ class Task:
     def _today_start(self) -> datetime:
         return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
+    def _view_today_secs(self) -> float:
+        total = 0.0
+        now = datetime.now()
+        today = now.date()
+
+        for session in self.sessions:
+            session_end = session.end if session.end is not None else now
+            if session.end is None or session_end.date() == today:
+                total += (session_end - session.begin).total_seconds()
+                continue
+
+            overlap_begin = max(session.begin, self._today_start())
+            overlap_end = min(session_end, now)
+            if overlap_begin < overlap_end:
+                total += (overlap_end - overlap_begin).total_seconds()
+
+        return total
+
     @property
     def total_seconds(self) -> float:
         total = 0.0
@@ -101,6 +119,18 @@ class Task:
     @property
     def has_today_activity(self) -> bool:
         return self.overlaps_period(self._today_start())
+
+    @property
+    def view_today_mins(self) -> int:
+        return int(self.view_today_secs // 60)
+
+    @property
+    def view_today_secs(self) -> float:
+        return self._view_today_secs()
+
+    @property
+    def has_view_today(self) -> bool:
+        return self.view_today_secs > 0
 
     @property
     def last_activity(self) -> Optional[datetime]:

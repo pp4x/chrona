@@ -23,10 +23,11 @@ APP_ICON_PATH = Path(__file__).resolve().parent.parent / "icons" / "chrona.png"
 
 # --- Task Table Model ---
 class TaskTableModel(QAbstractTableModel):
-    def __init__(self, tasks):
+    def __init__(self, tasks, use_view_today=False):
         super().__init__()
         self._tasks = tasks
         self._today_only = False
+        self._use_view_today = use_view_today
 
     def rowCount(self, parent=QModelIndex()):
         return len(self._tasks)
@@ -41,11 +42,18 @@ class TaskTableModel(QAbstractTableModel):
         if index.column() == 0:
             return task.name
         elif index.column() == 1:
-            seconds = task.today_seconds if self._today_only else task.total_seconds
+            seconds = self._task_duration_seconds(task)
             return format_seconds_as_minutes(seconds)
         elif index.column() == 2:
             return task.last_activity_display
         return None
+
+    def _task_duration_seconds(self, task: Task) -> float:
+        if not self._today_only:
+            return task.total_seconds
+        if self._use_view_today:
+            return task.view_today_secs
+        return task.today_seconds
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         if role != Qt.DisplayRole:
@@ -87,17 +95,28 @@ class TaskTab(QWidget):
     selection_changed = Signal()
     task_double_clicked = Signal(object)
 
-    def __init__(self, name, tasks=None, show_today_only_filter=False, parent=None):
+    def __init__(
+        self,
+        name,
+        tasks=None,
+        show_today_only_filter=False,
+        use_view_today=False,
+        parent=None,
+    ):
         super().__init__(parent)
         self.name = name
         self._today_only = False
+        self._use_view_today = use_view_today
         self._all_tasks = list(tasks or [])
         self._filtered_tasks = self._sort_tasks_by_last_activity(self._all_tasks.copy())
         layout = QVBoxLayout(self)
         self.table = QTableView()
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.model = TaskTableModel(self._filtered_tasks)
+        self.model = TaskTableModel(
+            self._filtered_tasks,
+            use_view_today=use_view_today,
+        )
         self.table.setModel(self.model)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.selectionModel().selectionChanged.connect(self._emit_selection_changed)
@@ -153,7 +172,11 @@ class TaskTab(QWidget):
         else:
             filtered_tasks = [task for task in self._all_tasks if t in task.name.lower()]
         if self._today_only:
-            filtered_tasks = [task for task in filtered_tasks if task.has_today_activity]
+            filtered_tasks = [
+                task
+                for task in filtered_tasks
+                if self._has_today_activity(task)
+            ]
         self._filtered_tasks = self._sort_tasks_by_last_activity(filtered_tasks)
         self.model.update_tasks(self._filtered_tasks)
         self._refresh_total_label()
@@ -203,10 +226,15 @@ class TaskTab(QWidget):
 
     def _refresh_total_label(self):
         total_seconds = sum(
-            task.today_seconds if self._today_only else task.total_seconds
+            self.model._task_duration_seconds(task)
             for task in self._filtered_tasks
         )
         self.total_label.setText(f"Total: {format_seconds_as_minutes(total_seconds)}")
+
+    def _has_today_activity(self, task: Task) -> bool:
+        if not self._use_view_today:
+            return task.has_today_activity
+        return task.has_view_today
 
 class MainWindow(QMainWindow):
     @staticmethod
@@ -297,6 +325,7 @@ class MainWindow(QMainWindow):
             "Active",
             tasks=self.repository.list_active_tasks(),
             show_today_only_filter=True,
+            use_view_today=True,
         )
         self.completed_tab = TaskTab("Completed", tasks=self.repository.list_completed_tasks())
         self.reports_tab = ReportsPane(connection=self.connection)
