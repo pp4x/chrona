@@ -29,6 +29,7 @@ class TaskEditDialog(QDialog):
         super().__init__(parent)
         self.task = task
         self.save_handler = save_handler
+        self.orig_rows = []
         self.setWindowTitle("Edit Task")
         self.resize(640, 360)
 
@@ -69,16 +70,18 @@ class TaskEditDialog(QDialog):
 
     def _populate_sessions(self):
         self.sessions_table.setRowCount(0)
+        self.orig_rows = []
         for session in self.task.sessions:
-            self._insert_session_row(session.begin, session.end)
+            self._insert_session_row(session.begin, session.end, orig=(session.begin, session.end))
         self._refresh_open_controls()
         self._refresh_action_buttons()
 
-    def _insert_session_row(self, begin=None, end=None, row=0):
+    def _insert_session_row(self, begin=None, end=None, row=0, orig=(None, None)):
         if begin is None:
             begin = datetime.now()
 
         self.sessions_table.insertRow(row)
+        self.orig_rows.insert(row, orig)
         begin_edit = self._create_datetime_edit(begin)
         self.sessions_table.setCellWidget(row, 0, begin_edit)
         self.sessions_table.setCellWidget(row, 1, self._create_end_editor(end))
@@ -93,6 +96,7 @@ class TaskEditDialog(QDialog):
         selected_rows = sorted(self._selected_rows(), reverse=True)
         for row in selected_rows:
             self.sessions_table.removeRow(row)
+            del self.orig_rows[row]
         self._refresh_open_controls()
         self._refresh_action_buttons()
 
@@ -109,6 +113,7 @@ class TaskEditDialog(QDialog):
 
         for row in reversed(selected_rows):
             self.sessions_table.removeRow(row)
+            del self.orig_rows[row]
 
         insert_row = min(selected_rows)
         self._insert_session_row(merged.begin, merged.end, insert_row)
@@ -173,9 +178,21 @@ class TaskEditDialog(QDialog):
             value.second,
         )
 
+    def _snap_min(self, value):
+        if value is None:
+            return value
+        return value.replace(second=0, microsecond=0)
+
+    def _same_min(self, left, right):
+        return self._snap_min(left) == self._snap_min(right)
+
     def _begin_value(self, row):
         editor = self.sessions_table.cellWidget(row, 0)
-        return editor.dateTime().toPython()
+        value = editor.dateTime().toPython()
+        orig, _ = self.orig_rows[row]
+        if orig is not None and self._same_min(value, orig):
+            return orig
+        return self._snap_min(value)
 
     def _end_value(self, row):
         container = self.sessions_table.cellWidget(row, 1)
@@ -183,7 +200,11 @@ class TaskEditDialog(QDialog):
         open_checkbox = container.layout().itemAt(1).widget()
         if open_checkbox.isChecked():
             return None
-        return end_edit.dateTime().toPython()
+        _, orig = self.orig_rows[row]
+        value = end_edit.dateTime().toPython()
+        if orig is not None and self._same_min(value, orig):
+            return orig
+        return self._snap_min(value)
 
     def save(self):
         name = self.name_input.text().strip()

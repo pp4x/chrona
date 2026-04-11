@@ -70,3 +70,21 @@ def subtract_interval(
                 updated_sessions.append(Session(begin=right_begin, end=right_end))
 
     return updated_sessions
+
+
+def trim_sessions(
+    sessions: list[Session],
+    cuts: list[Session],
+    now: datetime,
+) -> list[Session]:
+    updated_sessions = [Session(begin=session.begin, end=session.end) for session in sessions]
+
+    for interval in cuts:
+        updated_sessions = subtract_interval(
+            updated_sessions,
+            interval.begin,
+            effective_end(interval, now),
+            now,
+        )
+
+    return updated_sessions

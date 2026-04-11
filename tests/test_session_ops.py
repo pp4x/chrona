@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from Task import Session
-from session_ops import coalesce_sessions, normalize_sessions, subtract_interval
+from session_ops import coalesce_sessions, normalize_sessions, subtract_interval, trim_sessions
 
 
 def dt(hour, minute=0):
@@ -54,6 +54,22 @@ def test_subtract_removes_session():
     updated = subtract_interval(sessions, dt(8), dt(11), dt(12))
 
     assert updated == []
+
+
+def test_trim_sessions_cuts_all():
+    sessions = [Session(begin=dt(9), end=dt(15))]
+    cuts = [
+        Session(begin=dt(10), end=dt(11)),
+        Session(begin=dt(13), end=dt(14)),
+    ]
+
+    updated = trim_sessions(sessions, cuts, dt(16))
+
+    assert updated == [
+        Session(begin=dt(9), end=dt(10)),
+        Session(begin=dt(11), end=dt(13)),
+        Session(begin=dt(14), end=dt(15)),
+    ]
 
 
 def test_normalize_keeps_touching():

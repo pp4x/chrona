@@ -16,7 +16,7 @@ from reports_pane import ReportsPane
 from Task import Task
 from repository import TaskRepository
 from conflict_dialog import ConflictResolutionDialog
-from session_ops import effective_end, normalize_sessions, subtract_interval
+from session_ops import effective_end, normalize_sessions, trim_sessions
 from task_edit_dialog import TaskEditDialog
 
 APP_ICON_PATH = Path(__file__).resolve().parent.parent / "icons" / "chrona.png"
@@ -359,7 +359,7 @@ class MainWindow(QMainWindow):
 
             if dialog.choice == ConflictResolutionDialog.KEEP_EXISTING:
                 working_current.sessions = normalize_sessions(
-                    subtract_interval(working_current.sessions, overlap_begin, overlap_end, now),
+                    trim_sessions(working_current.sessions, conflicting_task.sessions, now),
                     now,
                 )
                 working_current.is_active = bool(
@@ -369,7 +369,7 @@ class MainWindow(QMainWindow):
 
             override_task = deepcopy(working_overrides.get(conflicting_task.id, conflicting_task))
             override_task.sessions = normalize_sessions(
-                subtract_interval(override_task.sessions, overlap_begin, overlap_end, now),
+                trim_sessions(override_task.sessions, working_current.sessions, now),
                 now,
             )
             override_task.is_active = bool(override_task.sessions and override_task.sessions[-1].end is None)
