@@ -8,14 +8,14 @@ class MoveSessionsDialog(QDialog):
         self.setWindowTitle("Move Sessions")
         self.resize(480, 360)
         self._source_task_name = source_task_name
+        self._all_task_names = list(active_task_names)
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Move selected sessions to:"))
 
         layout.addWidget(QLabel("Active tasks"))
         self.task_list = QListWidget(self)
-        self.task_list.addItems(active_task_names)
-        self.task_list.currentTextChanged.connect(self._sync_input_from_list)
+        self.task_list.itemClicked.connect(self._sync_input_from_item)
         layout.addWidget(self.task_list)
 
         self.name_input = QLineEdit(self)
@@ -30,32 +30,46 @@ class MoveSessionsDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        self.ok_button = buttons.button(QDialogButtonBox.Ok)
 
         self._sync_list_from_input(self.name_input.text())
+        self.name_input.setFocus(Qt.OtherFocusReason)
 
     def destination_name(self):
         return self.name_input.text().strip()
 
-    def _sync_input_from_list(self, value):
-        if not value:
+    @staticmethod
+    def _normalize_name(value):
+        return " ".join(value.casefold().split())
+
+    def _sync_input_from_item(self, item):
+        if item is None:
             return
-        self.name_input.setText(value)
+        self.name_input.setText(item.text())
 
     def _sync_list_from_input(self, value):
-        matching_items = self.task_list.findItems(value, Qt.MatchExactly)
+        normalized_value = self._normalize_name(value)
         self.task_list.blockSignals(True)
-        if matching_items:
-            self.task_list.setCurrentItem(matching_items[0])
+        self.task_list.clear()
+        if not normalized_value:
+            filtered_names = self._all_task_names
         else:
-            self.task_list.clearSelection()
-            self.task_list.setCurrentItem(None)
+            filtered_names = [
+                task_name
+                for task_name in self._all_task_names
+                if self._normalize_name(task_name).startswith(normalized_value)
+            ]
+        self.task_list.addItems(filtered_names)
         self.task_list.blockSignals(False)
 
-        normalized = " ".join(value.casefold().split())
-        source_normalized = " ".join(self._source_task_name.casefold().split())
-        if not normalized:
-            self.feedback_label.setText("Choose an active task or type a task name.")
-        elif normalized == source_normalized:
+        source_normalized = self._normalize_name(self._source_task_name)
+        if not normalized_value:
+            self.feedback_label.setText("Choose an active task or type a new task name.")
+        elif normalized_value == source_normalized:
             self.feedback_label.setText("Destination must be different from the current task.")
+        elif filtered_names:
+            self.feedback_label.setText("Click a task to use its exact name, or keep typing to create/reactivate.")
         else:
-            self.feedback_label.setText("Typing a completed task name will reactivate it.")
+            self.feedback_label.setText("No active match. Typing a new name creates a task; a completed name reactivates it.")
+
+        self.ok_button.setEnabled(bool(value.strip()))
