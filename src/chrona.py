@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import sys
 from copy import deepcopy
 from datetime import datetime
@@ -12,8 +14,9 @@ from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, Signal, QTimer
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from db import connect_database, ensure_schema
 from formatting import format_seconds_as_minutes
+from move_sessions_dialog import MoveSessionsDialog
 from reports_pane import ReportsPane
-from Task import Task
+from Task import Session, Task
 from repository import TaskRepository
 from conflict_dialog import ConflictResolutionDialog
 from session_ops import effective_end, normalize_sessions, trim_sessions
@@ -361,14 +364,17 @@ class MainWindow(QMainWindow):
     def all_tasks(self):
         return self.active_tab._all_tasks + self.completed_tab._all_tasks
 
-    def apply_task_edits(self, task: Task, name: str, sessions):
+    def _resolve_task_edits(self, task: Task, name: str, sessions, initial_overrides=None):
         now = datetime.now()
         working_current = deepcopy(task)
         working_current.name = name
         working_current.sessions = normalize_sessions(sessions, now)
         working_current.is_active = bool(working_current.sessions and working_current.sessions[-1].end is None)
 
-        working_overrides = {}
+        working_overrides = {
+            task_id: deepcopy(override)
+            for task_id, override in (initial_overrides or {}).items()
+        }
 
         while True:
             conflict = self.find_first_conflict(working_current, working_overrides, now)
@@ -404,12 +410,16 @@ class MainWindow(QMainWindow):
             override_task.is_active = bool(override_task.sessions and override_task.sessions[-1].end is None)
             working_overrides[override_task.id] = override_task
 
-        task.name = working_current.name
-        task.sessions = working_current.sessions
-        task.is_active = working_current.is_active
+        return working_current, working_overrides
+
+    def _commit_task_updates(self, task: Task, resolved_task: Task, resolved_overrides):
+        task.name = resolved_task.name
+        task.sessions = resolved_task.sessions
+        task.is_active = resolved_task.is_active
+        task.completed_at = resolved_task.completed_at
 
         tasks_to_save = [task]
-        for override in working_overrides.values():
+        for override in resolved_overrides.values():
             real_task = self.find_task_by_id(override.id)
             if real_task is None:
                 continue
@@ -420,6 +430,104 @@ class MainWindow(QMainWindow):
             tasks_to_save.append(real_task)
 
         self.repository.save_tasks(tasks_to_save)
+        return tasks_to_save
+
+    def apply_task_edits(self, task: Task, name: str, sessions):
+        working_current, working_overrides = self._resolve_task_edits(task, name, sessions)
+        self._commit_task_updates(task, working_current, working_overrides)
+        return True
+
+    def prompt_move_destination(self, source_task_name: str):
+        active_task_names = sorted(
+            {task.name for task in self.active_tab._all_tasks if task.name != source_task_name},
+            key=str.casefold,
+        )
+        dialog = MoveSessionsDialog(active_task_names, source_task_name, self)
+        if dialog.exec() != QDialog.Accepted:
+            return None
+
+        destination_name = dialog.destination_name()
+        if not destination_name:
+            QMessageBox.warning(self, "Invalid Task", "Destination task name cannot be empty.")
+            return None
+
+        if self.normalize_task_name(destination_name) == self.normalize_task_name(source_task_name):
+            QMessageBox.warning(
+                self,
+                "Invalid Task",
+                "Selected sessions are already on that task.",
+            )
+            return None
+
+        return destination_name
+
+    def move_task_sessions(self, task: Task, name: str, sessions, selected_sessions):
+        working_current, working_overrides = self._resolve_task_edits(task, name, sessions)
+        now = datetime.now()
+        remaining_sessions = normalize_sessions(trim_sessions(working_current.sessions, selected_sessions, now), now)
+        moved_sessions = normalize_sessions(trim_sessions(working_current.sessions, remaining_sessions, now), now)
+        if not moved_sessions:
+            QMessageBox.warning(
+                self,
+                "Nothing To Move",
+                "The selected sessions no longer exist after conflict resolution.",
+            )
+            return False
+
+        destination_name = self.prompt_move_destination(working_current.name)
+        if destination_name is None:
+            return False
+
+        destination_task, source_tab = self.find_task_by_name(destination_name)
+        if destination_task is None:
+            destination_task = Task(name=destination_name)
+        else:
+            destination_name = destination_task.name
+
+        working_current.sessions = remaining_sessions
+        working_current.is_active = bool(remaining_sessions and remaining_sessions[-1].end is None)
+
+        destination_initial_overrides = dict(working_overrides)
+        if task.id is not None:
+            destination_initial_overrides[task.id] = deepcopy(working_current)
+
+        destination_sessions = normalize_sessions(destination_task.sessions + moved_sessions, now)
+        resolved_destination, destination_overrides = self._resolve_task_edits(
+            destination_task,
+            destination_name,
+            destination_sessions,
+            initial_overrides=destination_initial_overrides,
+        )
+        resolved_destination.completed_at = None
+        resolved_destination.is_active = bool(
+            resolved_destination.sessions and resolved_destination.sessions[-1].end is None
+        )
+
+        combined_overrides = dict(working_overrides)
+        for override_id, override_task in destination_overrides.items():
+            if override_id == task.id:
+                working_current = deepcopy(override_task)
+                continue
+            combined_overrides[override_id] = override_task
+
+        current_widget = self.tabs.currentWidget()
+        self._commit_task_updates(task, working_current, combined_overrides)
+
+        destination_was_completed = source_tab is self.completed_tab
+        if destination_task.id is None:
+            self.active_tab.add_task(destination_task)
+        elif destination_was_completed:
+            self.completed_tab.remove_task(destination_task)
+            self.active_tab.add_task(destination_task)
+        self._commit_task_updates(destination_task, resolved_destination, combined_overrides)
+
+        self.active_tab.refresh()
+        self.completed_tab.refresh()
+        self.tabs.setCurrentWidget(self.active_tab)
+        self.active_tab.select_task(destination_task)
+        if current_widget in (self.active_tab, self.completed_tab):
+            current_widget.refresh()
+        self.update_toolbar_state()
         return True
 
     def find_first_conflict(self, working_current: Task, working_overrides, now):
@@ -555,7 +663,7 @@ class MainWindow(QMainWindow):
         self.resume_selected_task()
 
     def edit_task(self, task: Task):
-        dialog = TaskEditDialog(task, self.apply_task_edits, self)
+        dialog = TaskEditDialog(task, self.apply_task_edits, self.move_task_sessions, self)
         if dialog.exec() != QDialog.Accepted:
             return
 

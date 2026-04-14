@@ -30,6 +30,20 @@ class ReportDataAdapter:
         if self.connection is None:
             return []
 
+        if group_by == "Timeline":
+            slices = self._session_slices(period_type, period_start, category, text_filter)
+            slices.sort(key=lambda row: (row["begin"], row["end"], row["name"].lower()))
+            return [
+                {
+                    "task": row["name"],
+                    "begin": row["begin"],
+                    "end": row["end"],
+                    "time": row["seconds"],
+                    "end_display": row["end"].strftime("%H:%M") if row["is_ongoing"] is False else row["end_display"],
+                }
+                for row in slices
+            ]
+
         task_totals = {}
         for row in self._session_slices(period_type, period_start, category, text_filter):
             task_entry = task_totals.setdefault(
@@ -164,31 +178,32 @@ class ReportDataAdapter:
 
 # --- Table Model for Task Grouping ---
 class ReportTableModel(QAbstractTableModel):
-    def __init__(self, data):
+    def __init__(self, data, headers=None, value_getters=None):
         super().__init__()
         self._data = data
+        self._headers = headers or ["Name", "Time"]
+        self._value_getters = value_getters or [
+            lambda row: row["name"],
+            lambda row: format_seconds_as_minutes(row["time"]),
+        ]
 
     def rowCount(self, parent=QModelIndex()):
         return len(self._data)
 
     def columnCount(self, parent=QModelIndex()):
-        return 2  # Name, Time
+        return len(self._headers)
 
     def data(self, index, role=Qt.DisplayRole):
         if not index.isValid() or role != Qt.DisplayRole:
             return None
         row = self._data[index.row()]
-        if index.column() == 0:
-            return row["name"]
-        elif index.column() == 1:
-            return format_seconds_as_minutes(row["time"])
-        return None
+        return self._value_getters[index.column()](row)
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         if role != Qt.DisplayRole:
             return None
         if orientation == Qt.Horizontal:
-            return ["Name", "Time"][section]
+            return self._headers[section]
         return None
 
 # --- Tree Model for Project Grouping ---
@@ -296,9 +311,8 @@ class ReportsPane(QWidget):
         self._populate_categories()
         self.category_combo.currentTextChanged.connect(self._on_category_changed)
         self.group_by_combo = QComboBox()
-        self.group_by_combo.addItems(["Task", "Project"])
-        self.group_by_combo.setCurrentText(self.state["group_by"])
         self.group_by_combo.currentTextChanged.connect(self._on_group_by_changed)
+        self._sync_group_by_options()
         filters.addWidget(QLabel("Category:"))
         filters.addWidget(self.category_combo)
         filters.addWidget(QLabel("Group by:"))
@@ -342,7 +356,21 @@ class ReportsPane(QWidget):
         )
         self._current_data = data
         # Update view
-        if self.state["group_by"] == "Task":
+        if self.state["group_by"] == "Timeline":
+            model = ReportTableModel(
+                data,
+                headers=["Begin", "End", "Task", "Duration"],
+                value_getters=[
+                    lambda row: row["begin"].strftime("%H:%M"),
+                    lambda row: row["end_display"],
+                    lambda row: row["task"],
+                    lambda row: format_seconds_as_minutes(row["time"]),
+                ],
+            )
+            self.table_view.setModel(model)
+            self.results_stack.setCurrentWidget(self.table_view)
+            total = sum(row["time"] for row in data)
+        elif self.state["group_by"] == "Task":
             model = ReportTableModel(data)
             self.table_view.setModel(model)
             self.results_stack.setCurrentWidget(self.table_view)
@@ -363,6 +391,7 @@ class ReportsPane(QWidget):
 
     def _on_type_changed(self, value):
         self.state["report_type"] = value
+        self._sync_group_by_options()
         if value == "Daily":
             self.state["period_start"] = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         elif value == "Monthly":
@@ -425,6 +454,21 @@ class ReportsPane(QWidget):
         self.state["group_by"] = value
         self._refresh_report()
 
+    def _sync_group_by_options(self):
+        current_value = self.state["group_by"]
+        options = ["Task", "Project"]
+        if self.state["report_type"] == "Daily":
+            options.append("Timeline")
+
+        self.group_by_combo.blockSignals(True)
+        self.group_by_combo.clear()
+        self.group_by_combo.addItems(options)
+        if current_value not in options:
+            current_value = "Task"
+            self.state["group_by"] = current_value
+        self.group_by_combo.setCurrentText(current_value)
+        self.group_by_combo.blockSignals(False)
+
     def _on_text_filter(self):
         self.state["text_filter"] = self.text_filter.text()
         self._refresh_report()
@@ -452,11 +496,15 @@ class ReportsPane(QWidget):
         return start.replace(hour=0, minute=0, second=0, microsecond=0)
 
     def _open_task_details(self, index):
-        if not index.isValid() or self.state["group_by"] != "Task":
+        if not index.isValid():
             return
 
         row = self._current_data[index.row()]
-        self._show_details_dialog("Task", row["name"])
+        if self.state["group_by"] == "Task":
+            self._show_details_dialog("Task", row["name"])
+            return
+        if self.state["group_by"] == "Timeline":
+            self._show_details_dialog("Task", row["task"])
 
     def _open_project_details(self, index):
         if not index.isValid() or self.state["group_by"] != "Project":

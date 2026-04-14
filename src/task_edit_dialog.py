@@ -25,10 +25,11 @@ from session_ops import coalesce_sessions, normalize_sessions
 class TaskEditDialog(QDialog):
     DATETIME_FORMAT = "yyyy-MM-dd HH:mm"
 
-    def __init__(self, task: Task, save_handler=None, parent=None):
+    def __init__(self, task: Task, save_handler=None, move_handler=None, parent=None):
         super().__init__(parent)
         self.task = task
         self.save_handler = save_handler
+        self.move_handler = move_handler
         self.orig_rows = []
         self.setWindowTitle("Edit Task")
         self.resize(640, 360)
@@ -54,9 +55,12 @@ class TaskEditDialog(QDialog):
         self.delete_session_btn.clicked.connect(self.delete_selected_sessions)
         self.coalesce_sessions_btn = QPushButton("Coalesce Selected Sessions")
         self.coalesce_sessions_btn.clicked.connect(self.coalesce_selected_sessions)
+        self.move_sessions_btn = QPushButton("Move Selected Sessions")
+        self.move_sessions_btn.clicked.connect(self.move_selected_sessions)
         button_row.addWidget(self.add_session_btn)
         button_row.addWidget(self.delete_session_btn)
         button_row.addWidget(self.coalesce_sessions_btn)
+        button_row.addWidget(self.move_sessions_btn)
         button_row.addStretch()
         layout.addLayout(button_row)
 
@@ -164,6 +168,7 @@ class TaskEditDialog(QDialog):
         selected_count = len(self._selected_rows())
         self.delete_session_btn.setEnabled(selected_count > 0)
         self.coalesce_sessions_btn.setEnabled(selected_count == 2)
+        self.move_sessions_btn.setEnabled(self.move_handler is not None and selected_count > 0)
 
     def _selected_rows(self):
         return {index.row() for index in self.sessions_table.selectionModel().selectedRows()}
@@ -206,11 +211,11 @@ class TaskEditDialog(QDialog):
             return orig
         return self._snap_min(value)
 
-    def save(self):
+    def _collect_sessions(self):
         name = self.name_input.text().strip()
         if not name:
             QMessageBox.warning(self, "Invalid Task", "Task name cannot be empty.")
-            return
+            return None, None
 
         sessions = []
         now = datetime.now()
@@ -224,7 +229,7 @@ class TaskEditDialog(QDialog):
                     "Invalid Session",
                     "All sessions except the most recent displayed row must have an end.",
                 )
-                return
+                return None, None
 
             if end is not None and end < begin:
                 QMessageBox.warning(
@@ -232,7 +237,7 @@ class TaskEditDialog(QDialog):
                     "Invalid Session",
                     f"End cannot be earlier than begin on row {row + 1}.",
                 )
-                return
+                return None, None
 
             sessions.append(Session(begin=begin, end=end))
         sessions = normalize_sessions(sessions, now)
@@ -243,7 +248,7 @@ class TaskEditDialog(QDialog):
                 "Invalid Sessions",
                 "Only one session can have an empty end.",
             )
-            return
+            return None, None
 
         if open_sessions and sessions[-1].end is not None:
             QMessageBox.warning(
@@ -251,6 +256,13 @@ class TaskEditDialog(QDialog):
                 "Invalid Sessions",
                 "Only the most recent session may have an empty end.",
             )
+            return None, None
+
+        return name, sessions
+
+    def save(self):
+        name, sessions = self._collect_sessions()
+        if name is None:
             return
 
         if self.save_handler is not None:
@@ -260,5 +272,29 @@ class TaskEditDialog(QDialog):
             self.task.name = name
             self.task.sessions = sessions
             self.task.is_active = bool(sessions and sessions[-1].end is None)
+
+        self.accept()
+
+    def move_selected_sessions(self):
+        if self.move_handler is None:
+            return
+
+        name, sessions = self._collect_sessions()
+        if name is None:
+            return
+
+        selected_rows = sorted(self._selected_rows(), reverse=True)
+        selected_sessions = [
+            Session(begin=self._begin_value(row), end=self._end_value(row))
+            for row in selected_rows
+        ]
+        selected_sessions.reverse()
+
+        if not selected_sessions:
+            QMessageBox.warning(self, "No Sessions Selected", "Select at least one session to move.")
+            return
+
+        if not self.move_handler(self.task, name, sessions, selected_sessions):
+            return
 
         self.accept()
