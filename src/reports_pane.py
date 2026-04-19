@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit,
     QStackedWidget, QTableView, QTreeView, QHeaderView
 )
-from PySide6.QtCore import Qt, QAbstractTableModel, QAbstractItemModel, QModelIndex
+from PySide6.QtCore import Qt, QAbstractTableModel, QAbstractItemModel, QModelIndex, Signal
 from datetime import datetime, timedelta
 from formatting import format_minutes, format_seconds_as_minutes
 from report_details_dialog import ReportDetailsDialog
@@ -265,6 +265,8 @@ class ReportTreeModel(QAbstractItemModel):
 
 # --- Reports Pane Widget ---
 class ReportsPane(QWidget):
+    edit_day_requested = Signal(object)
+
     def __init__(self, connection=None, parent=None):
         super().__init__(parent)
         self.adapter = ReportDataAdapter(connection)
@@ -298,11 +300,14 @@ class ReportsPane(QWidget):
         self.current_period_btn.clicked.connect(self._on_current_period)
         self.next_btn = QPushButton("→")
         self.next_btn.clicked.connect(self._on_next)
+        self.edit_day_btn = QPushButton("Edit Day")
+        self.edit_day_btn.clicked.connect(self._on_edit_day)
         top.addWidget(self.type_combo)
         top.addWidget(self.prev_btn)
         top.addWidget(self.period_label)
         top.addWidget(self.current_period_btn)
         top.addWidget(self.next_btn)
+        top.addWidget(self.edit_day_btn)
         top.addStretch()
         layout.addLayout(top)
         # Filters
@@ -346,6 +351,7 @@ class ReportsPane(QWidget):
         # Update period label
         self.period_label.setText(self._format_period_label())
         self.current_period_btn.setText(self._current_period_label())
+        self._refresh_edit_btn()
         # Get data
         data = self.adapter.get_report(
             self.state["report_type"],
@@ -472,6 +478,16 @@ class ReportsPane(QWidget):
     def _on_text_filter(self):
         self.state["text_filter"] = self.text_filter.text()
         self._refresh_report()
+
+    def _on_edit_day(self):
+        self.edit_day_requested.emit(self.state["period_start"])
+
+    def _refresh_edit_btn(self):
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        self.edit_day_btn.setEnabled(
+            self.state["report_type"] == "Daily"
+            and self.state["period_start"] <= today_start
+        )
 
     def _format_period_label(self):
         if self.state["report_type"] == "Daily":

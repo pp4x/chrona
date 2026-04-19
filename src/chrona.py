@@ -21,6 +21,7 @@ from repository import TaskRepository
 from conflict_dialog import ConflictResolutionDialog
 from session_ops import effective_end, normalize_sessions, trim_sessions
 from task_edit_dialog import TaskEditDialog
+from timeline_editor import TimelineEditorDialog, apply_rows_to_tasks
 
 APP_ICON_PATH = Path(__file__).resolve().parent.parent / "icons" / "chrona.png"
 
@@ -342,6 +343,7 @@ class MainWindow(QMainWindow):
         self.completed_tab.selection_changed.connect(self.update_toolbar_state)
         self.active_tab.task_double_clicked.connect(self.edit_task)
         self.completed_tab.task_double_clicked.connect(self.edit_task)
+        self.reports_tab.edit_day_requested.connect(self.edit_day_timeline)
         self.new_activity_shortcut = QShortcut(QKeySequence(Qt.Key_Insert), self)
         self.new_activity_shortcut.activated.connect(self.add_new_task)
         self.pause_resume_shortcut = QShortcut(QKeySequence(Qt.Key_Space), self)
@@ -363,6 +365,44 @@ class MainWindow(QMainWindow):
 
     def all_tasks(self):
         return self.active_tab._all_tasks + self.completed_tab._all_tasks
+
+    def reload_tasks(self):
+        self.active_tab._all_tasks = self.repository.list_active_tasks()
+        self.completed_tab._all_tasks = self.repository.list_completed_tasks()
+        self.active_tab.refresh()
+        self.completed_tab.refresh()
+
+    def edit_day_timeline(self, day_start: datetime):
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        if day_start > today_start:
+            return
+
+        active_tasks = self.repository.list_active_tasks()
+        completed_tasks = self.repository.list_completed_tasks()
+        dialog = TimelineEditorDialog(
+            day_start,
+            active_tasks,
+            completed_tasks,
+            self.save_day_timeline,
+            self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        self.reload_tasks()
+        self.reports_tab.refresh()
+        self.update_toolbar_state()
+
+    def save_day_timeline(self, day_start, rows, active_tasks, completed_tasks):
+        changed_tasks = apply_rows_to_tasks(
+            active_tasks,
+            completed_tasks,
+            day_start,
+            rows,
+            datetime.now(),
+        )
+        self.repository.save_tasks(changed_tasks)
+        return True
 
     def _resolve_task_edits(self, task: Task, name: str, sessions, initial_overrides=None):
         now = datetime.now()
